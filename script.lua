@@ -1,8 +1,9 @@
--- CUCUMBER Movement — v15 (fixed menu, все вкладки в сайдбаре)
--- RightShift = меню | End = unload
+-- CUCUMBER Movement — v16 (glow fix + Z mouse unlock)
+-- RightShift = меню | Z (hold) = разблокировать мышь в любой момент
 -- Space (hold) = bhop | LeftCtrl + Space (air) = edgejump
 -- V (hold in air) = pixel-glide | LeftShift в воздухе = autostrafe
 -- Skate: Space on ground = ollie, Space in air = kickflip
+-- End = unload
 
 local Players = game:GetService("Players")
 local RS      = game:GetService("RunService")
@@ -895,6 +896,7 @@ local kbA     = makeKeyBadge("A", 5)
 local kbS     = makeKeyBadge("S", 6)
 local kbD     = makeKeyBadge("D", 7)
 local kbV     = makeKeyBadge("V", 8)
+local kbZ     = makeKeyBadge("Z", 9)
 
 local function setKey(badge, on, color)
     color = color or H.accent
@@ -905,7 +907,7 @@ local function setKey(badge, on, color)
 end
 
 -- ============================================================
--- MENU (v15 — вертикальный сайдбар, все вкладки видны)
+-- MENU
 -- ============================================================
 local T = {
     bg      = Color3.fromRGB(10, 14, 10),
@@ -957,6 +959,7 @@ glow.BackgroundColor3 = T.accent
 glow.BackgroundTransparency = 0.95
 glow.BorderSizePixel = 0
 glow.ZIndex = 0
+glow.Visible = false
 glow.Parent = gui
 corner(glow, 16)
 
@@ -1002,7 +1005,7 @@ subtitle.Size = UDim2.new(1, -60, 0, 14)
 subtitle.Position = UDim2.new(0, 16, 0, 34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = T.font
-subtitle.Text = "movement suite  •  v15"
+subtitle.Text = "movement suite  •  v16  •  Z = unlock mouse"
 subtitle.TextColor3 = T.dim
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -1520,11 +1523,14 @@ do
     end)
 end
 
--- MOUSE UNLOCK
+-- ============================================================
+-- MOUSE UNLOCK (меню + Z)
+-- ============================================================
 local menuOpen = false
+local mouseUnlocked = false
 
 RS:BindToRenderStep("CucumberMouseUnlock", Enum.RenderPriority.Camera.Value + 1, function()
-    if menuOpen then
+    if menuOpen or mouseUnlocked then
         if UIS.MouseBehavior ~= Enum.MouseBehavior.Default then
             UIS.MouseBehavior = Enum.MouseBehavior.Default
         end
@@ -1534,9 +1540,28 @@ RS:BindToRenderStep("CucumberMouseUnlock", Enum.RenderPriority.Camera.Value + 1,
     end
 end)
 
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Z then
+        mouseUnlocked = true
+        UIS.MouseBehavior = Enum.MouseBehavior.Default
+        UIS.MouseIconEnabled = true
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Z then
+        mouseUnlocked = false
+        if not menuOpen then
+            UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end
+    end
+end)
+
 local function openMenu()
     menuOpen = true
     menu.Visible = true
+    glow.Visible = true
     UIS.MouseBehavior = Enum.MouseBehavior.Default
     UIS.MouseIconEnabled = true
     if currentTab == nil then selectTab("Movement") end
@@ -1545,6 +1570,10 @@ end
 local function closeMenu()
     menuOpen = false
     menu.Visible = false
+    glow.Visible = false
+    if not mouseUnlocked then
+        UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+    end
 end
 
 local function toggleMenu()
@@ -1615,6 +1644,7 @@ RS.RenderStepped:Connect(function()
     setKey(kbS,     UIS:IsKeyDown(Enum.KeyCode.S), H.accent)
     setKey(kbD,     UIS:IsKeyDown(Enum.KeyCode.D), H.accent)
     setKey(kbV,     UIS:IsKeyDown(Enum.KeyCode.V), H.accent)
+    setKey(kbZ,     UIS:IsKeyDown(Enum.KeyCode.Z), Color3.fromRGB(255, 200, 80))
 end)
 
 game:BindToClose(function()
