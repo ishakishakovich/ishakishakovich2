@@ -1,21 +1,7 @@
 -- ============================================================
--- CUCUMBER Movement — v19 Public Release
+-- CUCUMBER Movement — v20 "Kайф Edition"
 -- Author: Shiv for He
--- RightShift = menu | Z = unlock mouse | End = unload
--- ============================================================
--- Features:
---   • Bhop / Auto-jump
---   • Autostrafe (Source-style)
---   • Pixel-glide (V)
---   • Edgejump / Edgebug (Ctrl)
---   • Counter-strafe (fast stop)
---   • Slide (C)
---   • Double-jump (optional)
---   • Skateboard with tricks (X)
---   • HUD: speed, keybinds, streak, FPS, ping
---   • Anti-AFK
---   • Config profiles + save/load
---   • Theme switcher
+-- RightShift menu | Z mouse | End unload
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -26,9 +12,7 @@ local Sound   = game:GetService("SoundService")
 local Http    = game:GetService("HttpService")
 local Debris  = game:GetService("Debris")
 
--- ── Environment guards ──────────────────────────────────────
 if _G.__CUCUMBER_LOADED then
-    warn("[CUCUMBER] already loaded, unloading previous instance")
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end
 _G.__CUCUMBER_LOADED = true
@@ -39,111 +23,99 @@ local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 local cam  = workspace.CurrentCamera
 
-local CONFIG_FILE = "cucumber_v19.json"
+local CONFIG_FILE = "cucumber_v20.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
-local HAS_HTTP    = pcall(function() return Http:JSONEncode({}) end)
 
 -- ============================================================
 -- CONFIG
 -- ============================================================
 local C = {
-    -- master
     moveEnabled = true,
-    theme       = "green",   -- green / cyan / red / purple / pink
+    theme = "green",
 
-    -- bhop
-    bhopKey    = Enum.KeyCode.Space,
-    jumpCd     = 0.04,
-    walkSpeed  = 24,
+    bhopKey = Enum.KeyCode.Space,
+    jumpCd = 0.04,
+    walkSpeed = 24,
     bhopIgnoreWalkSpeed = true,
-    acSafeMode = true,       -- auto-slow if game filters
 
-    -- air
-    autostrafeEnabled  = true,
-    autostrafeKey      = Enum.KeyCode.LeftShift,
-    autostrafeAccel    = 90,
+    autostrafeEnabled = true,
+    autostrafeKey = Enum.KeyCode.LeftShift,
+    autostrafeAccel = 90,
     autostrafeMaxSpeed = 110,
 
-    -- glide
-    glideKey     = Enum.KeyCode.V,
+    glideKey = Enum.KeyCode.V,
     glideControl = 10,
     autoSurfEnabled = true,
 
-    -- edge
     edgeJumpEnabled = true,
-    edgeJumpKey     = Enum.KeyCode.LeftControl,
-    edgeJumpLimit   = 2,
-    edgeJumpPower   = 20,
-    edgeJumpUsed    = 0,
-    edgebugEnabled  = true,
-    edgebugKey      = Enum.KeyCode.LeftControl,
+    edgeJumpKey = Enum.KeyCode.LeftControl,
+    edgeJumpLimit = 2,
+    edgeJumpPower = 20,
+    edgeJumpUsed = 0,
+    edgebugEnabled = true,
+    edgebugKey = Enum.KeyCode.LeftControl,
     edgebugLookDist = 3,
     edgebugCooldown = 0.15,
 
-    -- counter-strafe
     counterStrafeEnabled = true,
-    counterStrafePower   = 0.88,
+    counterStrafePower = 0.88,
 
-    -- slide
     slideEnabled = true,
-    slideKey     = Enum.KeyCode.C,
-    slidePower   = 40,
+    slideKey = Enum.KeyCode.C,
+    slidePower = 40,
     slideDuration = 0.5,
     slideCooldown = 1.0,
+    slideCamTilt = true,
 
-    -- double jump
     doubleJumpEnabled = false,
-    doubleJumpPower   = 30,
+    doubleJumpPower = 30,
 
-    -- skate
-    skateKey         = Enum.KeyCode.X,
-    skateEnabled     = false,
-    skatePopPower    = 30,
-    skateFlipTime    = 0.45,
-    skateCooldown    = 0.5,
-    skateShoveKey    = Enum.KeyCode.Q,
-    skateHeelKey     = Enum.KeyCode.E,
-    skateManualKey   = Enum.KeyCode.S,
-    skateUnderglow   = true,
+    skateKey = Enum.KeyCode.X,
+    skateEnabled = false,
+    skatePopPower = 30,
+    skateFlipTime = 0.45,
+    skateCooldown = 0.5,
+    skateShoveKey = Enum.KeyCode.Q,
+    skateHeelKey = Enum.KeyCode.E,
+    skateUnderglow = true,
     skateTrailEnabled = true,
 
-    -- fx
-    fxTrail      = false,
-    fxParticles  = false,
+    fxTrail = false,
+    fxParticles = false,
     fxFootSparks = true,
-    fxFOVKick    = false,
-    fxSound      = false,
+    fxFOVKick = false,
+    fxSound = false,
     fxMotionBlur = false,
-    fxRainbow    = false,
+    fxRainbow = false,
+    fxLandingShake = true,
 
-    -- hud
-    showSpeed    = true,
+    showSpeed = true,
     showSpeedBar = true,
-    showStreak   = true,
-    showMidKeys  = true,
-    showFPS      = true,
-    showPing     = true,
+    showStreak = true,
+    showMidKeys = true,
+    showFPS = true,
+    showPing = true,
+    showMaxSpeed = true,
 
-    -- util
     antiAfkEnabled = true,
 
-    -- keys
-    menuKey      = Enum.KeyCode.RightShift,
-    mouseKey     = Enum.KeyCode.Z,
-    unloadKey    = Enum.KeyCode.End,
+    soundEnabled = true,
+    soundVolume = 0.4,
 
-    -- colors (set by theme)
-    colAccent  = Color3.fromRGB(120, 230, 100),
+    menuKey = Enum.KeyCode.RightShift,
+    mouseKey = Enum.KeyCode.Z,
+    unloadKey = Enum.KeyCode.End,
+
+    colAccent = Color3.fromRGB(120, 230, 100),
     colAccent2 = Color3.fromRGB(80, 180, 70),
-    colTrail   = Color3.fromRGB(120, 230, 100),
-    colSparks  = Color3.fromRGB(180, 255, 120),
+    colTrail = Color3.fromRGB(120, 230, 100),
+    colSparks = Color3.fromRGB(180, 255, 120),
 
     soundId = "rbxassetid://9120386436",
-    soundVolume = 0.5,
 
-    bounds    = 2048,
-    margin    = 60,
-    fallY     = -500,
+    bounds = 2048,
+    margin = 60,
+    fallY = -500,
     resetDist = 4000,
 }
 
@@ -151,25 +123,86 @@ local C = {
 -- THEMES
 -- ============================================================
 local THEMES = {
-    green  = {accent = Color3.fromRGB(120,230,100), accent2 = Color3.fromRGB(80,180,70),  trail = Color3.fromRGB(120,230,100), sparks = Color3.fromRGB(180,255,120)},
-    cyan   = {accent = Color3.fromRGB(90,210,255),  accent2 = Color3.fromRGB(60,150,200), trail = Color3.fromRGB(90,210,255),  sparks = Color3.fromRGB(150,240,255)},
-    red    = {accent = Color3.fromRGB(255,90,100),  accent2 = Color3.fromRGB(180,60,70),  trail = Color3.fromRGB(255,90,100),  sparks = Color3.fromRGB(255,150,150)},
+    green  = {accent = Color3.fromRGB(120,230,100), accent2 = Color3.fromRGB(80,180,70), trail = Color3.fromRGB(120,230,100), sparks = Color3.fromRGB(180,255,120)},
+    cyan   = {accent = Color3.fromRGB(90,210,255), accent2 = Color3.fromRGB(60,150,200), trail = Color3.fromRGB(90,210,255), sparks = Color3.fromRGB(150,240,255)},
+    red    = {accent = Color3.fromRGB(255,90,100), accent2 = Color3.fromRGB(180,60,70), trail = Color3.fromRGB(255,90,100), sparks = Color3.fromRGB(255,150,150)},
     purple = {accent = Color3.fromRGB(180,120,255), accent2 = Color3.fromRGB(120,80,200), trail = Color3.fromRGB(180,120,255), sparks = Color3.fromRGB(220,180,255)},
     pink   = {accent = Color3.fromRGB(255,120,200), accent2 = Color3.fromRGB(200,80,160), trail = Color3.fromRGB(255,120,200), sparks = Color3.fromRGB(255,180,220)},
 }
-local function applyTheme(name)
-    local t = THEMES[name] or THEMES.green
-    C.colAccent  = t.accent
-    C.colAccent2 = t.accent2
-    C.colTrail   = t.trail
-    C.colSparks  = t.sparks
-    if trail then trail.Color = ColorSequence.new(C.colTrail) end
-    if footSparks then footSparks.Color = ColorSequence.new(C.colSparks) end
-    if particle then particle.Color = ColorSequence.new(C.colAccent) end
+
+-- ============================================================
+-- SOUND (small clean UI sounds via Roblox default assets)
+-- ============================================================
+local function playSound(id, vol, pitch)
+    if not C.soundEnabled then return end
+    local s = Instance.new("Sound")
+    s.SoundId = id or "rbxassetid://9118823101"  -- default UI click
+    s.Volume = (vol or 1) * C.soundVolume
+    s.PlaybackSpeed = pitch or 1
+    s.Parent = Sound
+    s:Play()
+    Debris:AddItem(s, 2)
+end
+local function sndClick() playSound("rbxassetid://9118823101", 0.6, 1.2) end
+local function sndOn()    playSound("rbxassetid://9118823101", 0.7, 1.5) end
+local function sndOff()   playSound("rbxassetid://9118823101", 0.7, 0.85) end
+local function sndNotify() playSound("rbxassetid://9118823101", 0.8, 1.8) end
+local function sndLanding() playSound("rbxassetid://9118823101", 0.5, 0.6) end
+
+-- ============================================================
+-- NOTIFICATIONS
+-- ============================================================
+local notifGui = Instance.new("ScreenGui")
+notifGui.Name = "CucumberNotif"; notifGui.ResetOnSpawn = false
+notifGui.IgnoreGuiInset = true; notifGui.DisplayOrder = 1001
+notifGui.Parent = plr:WaitForChild("PlayerGui")
+
+local notifHolder = Instance.new("Frame", notifGui)
+notifHolder.Size = UDim2.new(0, 300, 0, 200)
+notifHolder.Position = UDim2.new(0.5, -150, 0, 120)
+notifHolder.BackgroundTransparency = 1
+
+local notifLayout = Instance.new("UIListLayout", notifHolder)
+notifLayout.Padding = UDim.new(0, 6)
+notifLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function notify(text, color)
+    color = color or C.colAccent
+    local box = Instance.new("Frame", notifHolder)
+    box.Size = UDim2.new(0, 240, 0, 30)
+    box.BackgroundColor3 = Color3.fromRGB(10, 14, 10)
+    box.BackgroundTransparency = 0.2
+    box.BorderSizePixel = 0
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+    local st = Instance.new("UIStroke", box)
+    st.Color = color; st.Thickness = 1; st.Transparency = 0.4
+
+    local lbl = Instance.new("TextLabel", box)
+    lbl.Size = UDim2.new(1, -20, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamBold
+    lbl.Text = text
+    lbl.TextColor3 = color
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTransparency = 1
+
+    box.Size = UDim2.new(0, 200, 0, 30)
+    Tween:Create(box, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.new(0, 240, 0, 30)}):Play()
+    Tween:Create(lbl, TweenInfo.new(0.2), {TextTransparency = 0}):Play()
+
+    task.delay(1.5, function()
+        Tween:Create(box, TweenInfo.new(0.3), {Size = UDim2.new(0, 200, 0, 0), BackgroundTransparency = 1}):Play()
+        Tween:Create(lbl, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+        Tween:Create(st, TweenInfo.new(0.3), {Transparency = 1}):Play()
+        task.delay(0.35, function() box:Destroy() end)
+    end)
 end
 
 -- ============================================================
--- CONFIG SAVE / LOAD
+-- CONFIG SAVE/LOAD
 -- ============================================================
 local function saveConfig()
     if not HAS_FILE_IO then return false end
@@ -193,89 +226,142 @@ local function loadConfig()
 end
 
 -- ============================================================
--- SPLASH
+-- RECOMMENDED DEFAULTS
+-- ============================================================
+local function applyRecommended()
+    C.moveEnabled = true
+    C.bhopIgnoreWalkSpeed = true
+    C.autostrafeEnabled = true
+    C.slideEnabled = true
+    C.slideCamTilt = true
+    C.edgeJumpEnabled = true
+    C.edgebugEnabled = true
+    C.doubleJumpEnabled = false
+    C.autoSurfEnabled = true
+    C.counterStrafeEnabled = true
+    C.fxTrail = false
+    C.fxParticles = false
+    C.fxFootSparks = true
+    C.fxFOVKick = false
+    C.fxSound = false
+    C.fxMotionBlur = false
+    C.fxRainbow = false
+    C.fxLandingShake = true
+    C.showSpeed = true
+    C.showSpeedBar = true
+    C.showStreak = true
+    C.showMidKeys = true
+    C.showFPS = true
+    C.showPing = true
+    C.showMaxSpeed = true
+    C.antiAfkEnabled = true
+    C.soundEnabled = true
+end
+
+-- ============================================================
+-- THEME APPLY
+-- ============================================================
+local themeRefs = {}
+
+local function applyTheme(name)
+    local t = THEMES[name] or THEMES.green
+    C.colAccent = t.accent
+    C.colAccent2 = t.accent2
+    C.colTrail = t.trail
+    C.colSparks = t.sparks
+    if trail then trail.Color = ColorSequence.new(C.colTrail) end
+    if footSparks then footSparks.Color = ColorSequence.new(C.colSparks) end
+    if particle then particle.Color = ColorSequence.new(C.colAccent) end
+    -- update UI accents
+    for _, ref in ipairs(themeRefs) do
+        if ref.set then pcall(ref.set, t) end
+    end
+end
+
+-- ============================================================
+-- SPLASH (short & clean)
 -- ============================================================
 local splash = Instance.new("ScreenGui")
 splash.Name = "CucumberSplash"; splash.ResetOnSpawn = false
 splash.IgnoreGuiInset = true; splash.DisplayOrder = 10000
 splash.Parent = plr:WaitForChild("PlayerGui")
 
-local splashBg = Instance.new("Frame", splash)
-splashBg.Size = UDim2.new(1,0,1,0)
-splashBg.BackgroundColor3 = Color3.fromRGB(8,12,8)
-splashBg.BorderSizePixel = 0
+local sBg = Instance.new("Frame", splash)
+sBg.Size = UDim2.new(1,0,1,0)
+sBg.BackgroundColor3 = Color3.fromRGB(8,12,8)
+sBg.BorderSizePixel = 0
 
-local splashTitle = Instance.new("TextLabel", splashBg)
-splashTitle.Size = UDim2.new(1,0,0,80)
-splashTitle.Position = UDim2.new(0,0,0.5,-60)
-splashTitle.BackgroundTransparency = 1
-splashTitle.Font = Enum.Font.GothamBlack
-splashTitle.Text = "CUCUMBER"
-splashTitle.TextColor3 = Color3.fromRGB(120,230,100)
-splashTitle.TextSize = 72
-splashTitle.TextTransparency = 1
+local sTitle = Instance.new("TextLabel", sBg)
+sTitle.Size = UDim2.new(1,0,0,80)
+sTitle.Position = UDim2.new(0,0,0.5,-60)
+sTitle.BackgroundTransparency = 1
+sTitle.Font = Enum.Font.GothamBlack
+sTitle.Text = "CUCUMBER"
+sTitle.TextColor3 = Color3.fromRGB(120,230,100)
+sTitle.TextSize = 72
+sTitle.TextTransparency = 1
 
-local splashSub = Instance.new("TextLabel", splashBg)
-splashSub.Size = UDim2.new(1,0,0,24)
-splashSub.Position = UDim2.new(0,0,0.5,20)
-splashSub.BackgroundTransparency = 1
-splashSub.Font = Enum.Font.GothamBold
-splashSub.Text = "v19  •  public release"
-splashSub.TextColor3 = Color3.fromRGB(90,180,80)
-splashSub.TextSize = 14
-splashSub.TextTransparency = 1
+local sSub = Instance.new("TextLabel", sBg)
+sSub.Size = UDim2.new(1,0,0,20)
+sSub.Position = UDim2.new(0,0,0.5,20)
+sSub.BackgroundTransparency = 1
+sSub.Font = Enum.Font.GothamBold
+sSub.Text = "v20  •  кайф edition"
+sSub.TextColor3 = Color3.fromRGB(90,180,80)
+sSub.TextSize = 13
+sSub.TextTransparency = 1
 
-local splashBarBg = Instance.new("Frame", splashBg)
-splashBarBg.Size = UDim2.new(0,260,0,4)
-splashBarBg.Position = UDim2.new(0.5,-130,0.5,60)
-splashBarBg.BackgroundColor3 = Color3.fromRGB(30,40,30)
-splashBarBg.BorderSizePixel = 0
-Instance.new("UICorner", splashBarBg).CornerRadius = UDim.new(1,0)
+local sBarBg = Instance.new("Frame", sBg)
+sBarBg.Size = UDim2.new(0,260,0,3)
+sBarBg.Position = UDim2.new(0.5,-130,0.5,55)
+sBarBg.BackgroundColor3 = Color3.fromRGB(30,40,30)
+sBarBg.BorderSizePixel = 0
+Instance.new("UICorner", sBarBg).CornerRadius = UDim.new(1,0)
 
-local splashBarFill = Instance.new("Frame", splashBarBg)
-splashBarFill.Size = UDim2.new(0,0,1,0)
-splashBarFill.BackgroundColor3 = Color3.fromRGB(120,230,100)
-splashBarFill.BorderSizePixel = 0
-Instance.new("UICorner", splashBarFill).CornerRadius = UDim.new(1,0)
+local sBarFill = Instance.new("Frame", sBarBg)
+sBarFill.Size = UDim2.new(0,0,1,0)
+sBarFill.BackgroundColor3 = Color3.fromRGB(120,230,100)
+sBarFill.BorderSizePixel = 0
+Instance.new("UICorner", sBarFill).CornerRadius = UDim.new(1,0)
 
-Tween:Create(splashTitle, TweenInfo.new(0.4), {TextTransparency = 0}):Play()
-Tween:Create(splashSub,   TweenInfo.new(0.4), {TextTransparency = 0}):Play()
-Tween:Create(splashBarFill, TweenInfo.new(1.2), {Size = UDim2.new(1,0,1,0)}):Play()
+Tween:Create(sTitle, TweenInfo.new(0.35), {TextTransparency = 0}):Play()
+Tween:Create(sSub, TweenInfo.new(0.35), {TextTransparency = 0}):Play()
+Tween:Create(sBarFill, TweenInfo.new(0.9), {Size = UDim2.new(1,0,1,0)}):Play()
 
-task.delay(1.8, function()
-    Tween:Create(splashBg,      TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
-    Tween:Create(splashTitle,   TweenInfo.new(0.4), {TextTransparency = 1}):Play()
-    Tween:Create(splashSub,     TweenInfo.new(0.4), {TextTransparency = 1}):Play()
-    Tween:Create(splashBarBg,   TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-    Tween:Create(splashBarFill, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-    task.delay(0.5, function()
-        if splash then splash:Destroy() end
-    end)
+task.delay(1.2, function()
+    Tween:Create(sBg, TweenInfo.new(0.35), {BackgroundTransparency = 1}):Play()
+    Tween:Create(sTitle, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+    Tween:Create(sSub, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+    Tween:Create(sBarBg, TweenInfo.new(0.25), {BackgroundTransparency = 1}):Play()
+    Tween:Create(sBarFill, TweenInfo.new(0.25), {BackgroundTransparency = 1}):Play()
+    task.delay(0.4, function() if splash then splash:Destroy() end end)
 end)
 
 -- ============================================================
 -- STATE
 -- ============================================================
-local vel          = Vector3.zero
-local lastJump     = 0
-local alive        = true
-local spawnPos     = hrp.Position
-local glideOn      = false
-local glideSpeed   = 0
-local glideDir     = Vector3.zero
-local wasOnGround  = true
+local vel = Vector3.zero
+local lastJump = 0
+local alive = true
+local spawnPos = hrp.Position
+local glideOn = false
+local glideSpeed = 0
+local glideDir = Vector3.zero
+local wasOnGround = true
 local lastEdgebugAt = 0
-local bhopStreak   = 0
+local bhopStreak = 0
 local maxSpeedSession = 0
-local slideOn      = false
-local slideEndAt   = 0
-local lastSlideAt  = 0
+local lastLandingY = hrp.Position.Y
+local slideOn = false
+local slideEndAt = 0
+local lastSlideAt = 0
 local doubleJumpUsed = false
+local smoothedSpeed = 0
 
 local trail, particle, footSparks, glideSound, motionBlur
 
 -- ============================================================
--- FX BUILDERS (safe)
+-- FX BUILDERS
 -- ============================================================
 local function ensureTrail()
     if trail and trail.Parent then return end
@@ -305,8 +391,10 @@ local function ensureParticles()
         NumberSequenceKeypoint.new(0,0.4), NumberSequenceKeypoint.new(1,0)}
     particle.Transparency = NumberSequence.new{
         NumberSequenceKeypoint.new(0,0.1), NumberSequenceKeypoint.new(1,1)}
-    particle.Lifetime = NumberRange.new(0.5,0.8); particle.Rate = 0
-    particle.Speed = NumberRange.new(3,7); particle.SpreadAngle = Vector2.new(180,180)
+    particle.Lifetime = NumberRange.new(0.5,0.8)
+    particle.Rate = 0
+    particle.Speed = NumberRange.new(3,7)
+    particle.SpreadAngle = Vector2.new(180,180)
     particle.LightEmission = 1
     particle.Parent = a
 end
@@ -322,9 +410,12 @@ local function ensureFootSparks()
         NumberSequenceKeypoint.new(0,0.6), NumberSequenceKeypoint.new(1,0)}
     footSparks.Transparency = NumberSequence.new{
         NumberSequenceKeypoint.new(0,0.1), NumberSequenceKeypoint.new(1,1)}
-    footSparks.Lifetime = NumberRange.new(0.4,0.7); footSparks.Rate = 0
-    footSparks.Speed = NumberRange.new(8,14); footSparks.SpreadAngle = Vector2.new(60,60)
-    footSparks.Rotation = NumberRange.new(0,360); footSparks.RotSpeed = NumberRange.new(-180,180)
+    footSparks.Lifetime = NumberRange.new(0.4,0.7)
+    footSparks.Rate = 0
+    footSparks.Speed = NumberRange.new(8,14)
+    footSparks.SpreadAngle = Vector2.new(60,60)
+    footSparks.Rotation = NumberRange.new(0,360)
+    footSparks.RotSpeed = NumberRange.new(-180,180)
     footSparks.LightEmission = 1
     footSparks.Acceleration = Vector3.new(0,20,0)
     footSparks.Parent = a
@@ -333,8 +424,10 @@ end
 local function ensureGlideSound()
     if glideSound and glideSound.Parent then return end
     glideSound = Instance.new("Sound")
-    glideSound.SoundId = C.soundId; glideSound.Looped = true
-    glideSound.Volume = 0; glideSound.PlaybackSpeed = 1.2
+    glideSound.SoundId = C.soundId
+    glideSound.Looped = true
+    glideSound.Volume = 0
+    glideSound.PlaybackSpeed = 1.2
     glideSound.Parent = Sound
     pcall(function() glideSound:Play() end)
 end
@@ -370,25 +463,21 @@ local function setGlideFX(on)
     if C.fxSound then
         ensureGlideSound()
         if glideSound then
-            Tween:Create(glideSound, TweenInfo.new(0.3), {
-                Volume = on and C.soundVolume or 0}):Play()
+            Tween:Create(glideSound, TweenInfo.new(0.3), {Volume = on and C.soundVolume or 0}):Play()
         end
     end
     if C.fxFOVKick and cam then
         local target = on and 98 or 90
-        Tween:Create(cam, TweenInfo.new(on and 0.15 or 0.3), {
-            FieldOfView = target}):Play()
+        Tween:Create(cam, TweenInfo.new(on and 0.15 or 0.3), {FieldOfView = target}):Play()
     end
     if C.fxMotionBlur then
         ensureMotionBlur()
         if motionBlur then
-            Tween:Create(motionBlur, TweenInfo.new(0.3), {
-                Size = on and 8 or 0}):Play()
+            Tween:Create(motionBlur, TweenInfo.new(0.3), {Size = on and 8 or 0}):Play()
         end
     end
 end
 
--- rainbow trail background loop
 task.spawn(function()
     local hue = 0
     while _G.__CUCUMBER_LOADED do
@@ -405,22 +494,16 @@ end)
 -- ============================================================
 -- SKATEBOARD
 -- ============================================================
-local Skate = {
-    board = nil, weld = nil, lastFlipAt = 0,
-    flipping = false, manualOn = false,
-    underglowLight = nil, boardTrail = nil,
-}
+local Skate = {board = nil, weld = nil, lastFlipAt = 0, flipping = false, manualOn = false, underglowLight = nil, boardTrail = nil}
 
 local function buildBoard()
     if Skate.board and Skate.board.Parent then return Skate.board end
     if not hrp then return nil end
-
     local m = Instance.new("Model"); m.Name = "CucumberSkate"
 
     local deck = Instance.new("Part")
-    deck.Name = "Deck"
-    deck.Size = Vector3.new(2.6, 0.15, 0.75)
-    deck.Color = Color3.fromRGB(18, 18, 20)
+    deck.Name = "Deck"; deck.Size = Vector3.new(2.6,0.15,0.75)
+    deck.Color = Color3.fromRGB(18,18,20)
     deck.Material = Enum.Material.Metal
     deck.Reflectance = 0.25
     deck.CanCollide = false; deck.Massless = true
@@ -429,84 +512,48 @@ local function buildBoard()
     deck.Parent = m
 
     local grip = Instance.new("Part")
-    grip.Name = "Grip"
-    grip.Size = Vector3.new(2.4, 0.03, 0.68)
-    grip.Color = Color3.fromRGB(12, 12, 12)
+    grip.Size = Vector3.new(2.4,0.03,0.68)
+    grip.Color = Color3.fromRGB(12,12,12)
     grip.Material = Enum.Material.Fabric
     grip.CanCollide = false; grip.Massless = true
     grip.Parent = m
 
-    local stripL = Instance.new("Part")
-    stripL.Name = "StripL"
-    stripL.Size = Vector3.new(2.5, 0.08, 0.05)
-    stripL.Color = C.colAccent
-    stripL.Material = Enum.Material.Neon
-    stripL.CanCollide = false; stripL.Massless = true
-    stripL.Parent = m
-
-    local stripR = stripL:Clone(); stripR.Name = "StripR"; stripR.Parent = m
+    local strips = {}
+    for i = 1, 2 do
+        local s = Instance.new("Part")
+        s.Size = Vector3.new(2.5,0.08,0.05)
+        s.Color = C.colAccent; s.Material = Enum.Material.Neon
+        s.CanCollide = false; s.Massless = true
+        s.Parent = m
+        strips[i] = s
+    end
 
     local nose = Instance.new("Part")
-    nose.Name = "Nose"
-    nose.Size = Vector3.new(0.15, 0.18, 0.7)
-    nose.Color = C.colAccent
-    nose.Material = Enum.Material.Neon
+    nose.Size = Vector3.new(0.15,0.18,0.7)
+    nose.Color = C.colAccent; nose.Material = Enum.Material.Neon
     nose.CanCollide = false; nose.Massless = true
     nose.Parent = m
-    local tail = nose:Clone(); tail.Name = "Tail"; tail.Parent = m
+    local tail = nose:Clone(); tail.Parent = m
 
     local tL = Instance.new("Part")
-    tL.Name = "TruckL"
-    tL.Size = Vector3.new(0.25, 0.18, 0.55)
+    tL.Size = Vector3.new(0.25,0.18,0.55)
     tL.Color = Color3.fromRGB(180,180,190)
     tL.Material = Enum.Material.Metal
     tL.Reflectance = 0.4
     tL.CanCollide = false; tL.Massless = true
     tL.Parent = m
-    local tR = tL:Clone(); tR.Name = "TruckR"; tR.Parent = m
+    local tR = tL:Clone(); tR.Parent = m
 
     local wheels = {}
     for i = 1, 4 do
         local w = Instance.new("Part")
-        w.Name = "Wheel" .. i
         w.Shape = Enum.PartType.Cylinder
-        w.Size = Vector3.new(0.22, 0.38, 0.38)
-        w.Color = C.colAccent
-        w.Material = Enum.Material.Neon
+        w.Size = Vector3.new(0.22,0.38,0.38)
+        w.Color = C.colAccent; w.Material = Enum.Material.Neon
         w.CanCollide = false; w.Massless = true
         w.Orientation = Vector3.new(0,0,90)
         w.Parent = m
         wheels[i] = w
-
-        local hub = Instance.new("Part")
-        hub.Name = "Hub" .. i
-        hub.Shape = Enum.PartType.Cylinder
-        hub.Size = Vector3.new(0.24, 0.16, 0.16)
-        hub.Color = Color3.fromRGB(30,30,35)
-        hub.Material = Enum.Material.Metal
-        hub.Reflectance = 0.3
-        hub.CanCollide = false; hub.Massless = true
-        hub.Orientation = Vector3.new(0,0,90)
-        hub.Parent = m
-    end
-
-    local boltPositions = {
-        Vector3.new(-1.0,0,0.25), Vector3.new(-1.0,0,-0.25),
-        Vector3.new(1.0,0,0.25),  Vector3.new(1.0,0,-0.25),
-        Vector3.new(-0.7,0,0.25), Vector3.new(-0.7,0,-0.25),
-        Vector3.new(0.7,0,0.25),  Vector3.new(0.7,0,-0.25),
-    }
-    for i, _ in ipairs(boltPositions) do
-        local bolt = Instance.new("Part")
-        bolt.Name = "Bolt" .. i
-        bolt.Shape = Enum.PartType.Cylinder
-        bolt.Size = Vector3.new(0.05, 0.08, 0.08)
-        bolt.Color = Color3.fromRGB(220,220,220)
-        bolt.Material = Enum.Material.Metal
-        bolt.Reflectance = 0.6
-        bolt.CanCollide = false; bolt.Massless = true
-        bolt.Orientation = Vector3.new(0,0,90)
-        bolt.Parent = m
     end
 
     local lightAtt = Instance.new("Attachment", deck)
@@ -528,8 +575,8 @@ local function buildBoard()
     end
 
     weldTo(grip, CFrame.new(0,0.09,0))
-    weldTo(stripL, CFrame.new(0,0,0.38))
-    weldTo(stripR, CFrame.new(0,0,-0.38))
+    weldTo(strips[1], CFrame.new(0,0,0.38))
+    weldTo(strips[2], CFrame.new(0,0,-0.38))
     weldTo(nose, CFrame.new(1.32,0.05,0))
     weldTo(tail, CFrame.new(-1.32,0.05,0))
     weldTo(tL, CFrame.new(-0.9,-0.15,0))
@@ -539,29 +586,12 @@ local function buildBoard()
     weldTo(wheels[3], CFrame.new(0.9,-0.32,0.42))
     weldTo(wheels[4], CFrame.new(0.9,-0.32,-0.42))
 
-    for i = 1, 4 do
-        local hub = m:FindFirstChild("Hub" .. i)
-        if hub then
-            hub.CFrame = wheels[i].CFrame
-            local w = Instance.new("WeldConstraint")
-            w.Part0 = wheels[i]; w.Part1 = hub; w.Parent = wheels[i]
-        end
-    end
-
-    for i = 1, 8 do
-        local bolt = m:FindFirstChild("Bolt" .. i)
-        if bolt then
-            weldTo(bolt, CFrame.new(boltPositions[i].X, 0.09, boltPositions[i].Z))
-        end
-    end
-
     if C.skateTrailEnabled then
         local a0 = Instance.new("Attachment", deck); a0.Position = Vector3.new(0.8,-0.4,0)
         local a1 = Instance.new("Attachment", deck); a1.Position = Vector3.new(-0.8,-0.4,0)
         local bt = Instance.new("Trail")
         bt.Attachment0 = a0; bt.Attachment1 = a1
-        bt.Lifetime = 0.25; bt.MinLength = 0
-        bt.FaceCamera = true
+        bt.Lifetime = 0.25; bt.FaceCamera = true
         bt.Color = ColorSequence.new(C.colAccent)
         bt.Transparency = NumberSequence.new{
             NumberSequenceKeypoint.new(0,0.3), NumberSequenceKeypoint.new(1,1)}
@@ -582,7 +612,7 @@ local function attachBoard()
     local m = buildBoard()
     if not m or not m.PrimaryPart then return end
     local deck = m.PrimaryPart
-    deck.CFrame = hrp.CFrame * CFrame.new(0, -3.0, 0)
+    deck.CFrame = hrp.CFrame * CFrame.new(0,-3.0,0)
     if Skate.weld then Skate.weld:Destroy() end
     local w = Instance.new("WeldConstraint")
     w.Part0 = hrp; w.Part1 = deck; w.Parent = hrp
@@ -590,6 +620,7 @@ local function attachBoard()
     Skate.lastFlipAt = 0
     Skate.flipping = false
     C.skateEnabled = true
+    notify("Skateboard ON", C.colAccent)
 end
 
 local function detachBoard()
@@ -604,6 +635,7 @@ end
 local function toggleBoard()
     if Skate.board and Skate.board.Parent then
         detachBoard()
+        notify("Skateboard OFF", Color3.fromRGB(180,180,180))
     else
         attachBoard()
     end
@@ -624,15 +656,10 @@ local function doTrick(axis, dur)
             t = t + dt
             local a = math.clamp(t/dur, 0, 1)
             local rot
-            if axis == "x" then
-                rot = CFrame.Angles(math.rad(360*a),0,0)
-            elseif axis == "y" then
-                rot = CFrame.Angles(0,math.rad(360*a),0)
-            elseif axis == "x-rev" then
-                rot = CFrame.Angles(math.rad(-360*a),0,0)
-            else
-                rot = CFrame.new()
-            end
+            if axis == "x" then rot = CFrame.Angles(math.rad(360*a),0,0)
+            elseif axis == "y" then rot = CFrame.Angles(0,math.rad(360*a),0)
+            elseif axis == "x-rev" then rot = CFrame.Angles(math.rad(-360*a),0,0)
+            else rot = CFrame.new() end
             deck.CFrame = (hrp.CFrame * CFrame.new(0,-3.0,0)) * rot
         end
         if deck.Parent and hrp and hrp.Parent then
@@ -707,7 +734,7 @@ local function tryEdgebug()
     if hrp.AssemblyLinearVelocity.Y > -3 then return end
     lastEdgebugAt = tick()
     local v = hrp.AssemblyLinearVelocity
-    hrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.85, 0, v.Z * 0.85)
+    hrp.AssemblyLinearVelocity = Vector3.new(v.X*0.85, 0, v.Z*0.85)
     hum:ChangeState(Enum.HumanoidStateType.Running)
     task.delay(0.05, function()
         if alive and hrp then
@@ -721,7 +748,6 @@ end
 -- CHARACTER HOOK
 -- ============================================================
 local function hookCharacter(c)
-    -- cleanup previous
     if trail then trail:Destroy(); trail = nil end
     if particle then particle:Destroy(); particle = nil end
     if footSparks then footSparks:Destroy(); footSparks = nil end
@@ -739,20 +765,17 @@ local function hookCharacter(c)
     slideOn = false
     C.edgeJumpUsed = 0
     spawnPos = hrp.Position
+    lastLandingY = hrp.Position.Y
+    smoothedSpeed = 0
     hum.WalkSpeed = C.walkSpeed
 
-    if hum.Died then
-        hum.Died:Connect(function() alive = false end)
-    end
-
+    if hum.Died then hum.Died:Connect(function() alive = false end) end
     refreshFX()
     if C.skateEnabled then attachBoard() end
 end
 
 plr.CharacterAdded:Connect(hookCharacter)
-if hum.Died then
-    hum.Died:Connect(function() alive = false end)
-end
+if hum.Died then hum.Died:Connect(function() alive = false end) end
 hum.WalkSpeed = C.walkSpeed
 
 -- ============================================================
@@ -760,7 +783,7 @@ hum.WalkSpeed = C.walkSpeed
 -- ============================================================
 task.spawn(function()
     while _G.__CUCUMBER_LOADED do
-        task.wait(60 * 15)
+        task.wait(60 * 14)
         if C.antiAfkEnabled and alive and hum and hum.Parent then
             pcall(function()
                 local old = hum.JumpPower
@@ -777,19 +800,14 @@ end)
 -- ============================================================
 UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
-    if input.KeyCode == C.skateKey then
-        toggleBoard()
-    end
+    if input.KeyCode == C.skateKey then toggleBoard() end
 end)
 
 UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if not Skate.board then return end
-    if input.KeyCode == C.skateShoveKey then
-        doShoveit()
-    elseif input.KeyCode == C.skateHeelKey then
-        doHeelflip()
-    end
+    if input.KeyCode == C.skateShoveKey then doShoveit()
+    elseif input.KeyCode == C.skateHeelKey then doHeelflip() end
 end)
 
 UIS.InputBegan:Connect(function(input, gp)
@@ -808,7 +826,6 @@ UIS.InputBegan:Connect(function(input, gp)
     local onG = hum:GetState() == Enum.HumanoidStateType.Running
              or hum:GetState() == Enum.HumanoidStateType.Landed
     if not onG then
-        -- double jump
         if C.doubleJumpEnabled and not doubleJumpUsed and hrp then
             local cur = hrp.AssemblyLinearVelocity
             hrp.AssemblyLinearVelocity = Vector3.new(cur.X, math.max(cur.Y, C.doubleJumpPower), cur.Z)
@@ -831,17 +848,32 @@ RS.Heartbeat:Connect(function(dt)
     local onG = st == Enum.HumanoidStateType.Running or st == Enum.HumanoidStateType.Landed
     local m = mv()
 
+    -- landing detection for shake + sound
     if onG and not wasOnGround then
+        local fallDist = lastLandingY - hrp.Position.Y
+        if fallDist > 20 and C.fxLandingShake and cam then
+            local orig = cam.CFrame
+            task.spawn(function()
+                for i = 1, 4 do
+                    if not cam then return end
+                    cam.CFrame = orig * CFrame.new(math.random(-2,2)*0.05, math.random(-2,2)*0.05, 0)
+                    task.wait(0.03)
+                end
+                if cam then cam.CFrame = orig end
+            end)
+            sndLanding()
+        end
         C.edgeJumpUsed = 0
         doubleJumpUsed = false
         slideOn = false
     end
     wasOnGround = onG
+    lastLandingY = hrp.Position.Y
 
     local ev = hrp.AssemblyLinearVelocity
     vel = Vector3.new(vel.X, ev.Y, vel.Z)
 
-    -- bhop / walk speed handling
+    -- bhop / walk speed
     if C.bhopIgnoreWalkSpeed then
         if onG then
             if hum.WalkSpeed ~= C.walkSpeed then hum.WalkSpeed = C.walkSpeed end
@@ -855,20 +887,25 @@ RS.Heartbeat:Connect(function(dt)
         tryEdgebug()
     end
 
-    -- slide (C)
+    -- slide
     if C.slideEnabled and keyDown(C.slideKey) and onG and not slideOn
        and tick() - lastSlideAt > C.slideCooldown and m then
         slideOn = true
         slideEndAt = tick() + C.slideDuration
         lastSlideAt = tick()
-        local dir = m
-        hrp.AssemblyLinearVelocity = Vector3.new(dir.X, ev.Y, dir.Z) * C.slidePower
+        hrp.AssemblyLinearVelocity = Vector3.new(m.X, ev.Y, m.Z) * C.slidePower
+        if C.slideCamTilt and cam then
+            Tween:Create(cam, TweenInfo.new(0.15), {CFrame = cam.CFrame * CFrame.Angles(0,0,math.rad(5))}):Play()
+        end
     end
     if slideOn and tick() > slideEndAt then
         slideOn = false
+        if C.slideCamTilt and cam then
+            Tween:Create(cam, TweenInfo.new(0.2), {CFrame = cam.CFrame * CFrame.Angles(0,0,math.rad(-5))}):Play()
+        end
     end
 
-    -- glide (V)
+    -- glide
     local wantGlide = keyDown(C.glideKey) and not onG
     if wantGlide ~= glideOn then
         glideOn = wantGlide
@@ -991,8 +1028,7 @@ RS.Heartbeat:Connect(function(dt)
     -- safety
     local pos = hrp.Position
     if pos.Y < C.fallY or pos.Magnitude > C.resetDist then
-        hrp.CFrame = CFrame.new(spawnPos)
-        vel = Vector3.zero
+        hrp.CFrame = CFrame.new(spawnPos); vel = Vector3.zero
     end
 end)
 
@@ -1004,7 +1040,6 @@ hud.Name = "CucumberHUD"; hud.ResetOnSpawn = false
 hud.IgnoreGuiInset = true; hud.DisplayOrder = 998
 hud.Parent = plr:WaitForChild("PlayerGui")
 
--- speed panel
 local speedFrame = Instance.new("Frame", hud)
 speedFrame.Size = UDim2.new(0,170,0,64); speedFrame.Position = UDim2.new(0.5,-85,0,20)
 speedFrame.BackgroundColor3 = Color3.fromRGB(8,12,8)
@@ -1018,15 +1053,19 @@ speedStroke.Color = C.colAccent; speedStroke.Thickness = 1.5; speedStroke.Transp
 
 local speedTitle = Instance.new("TextLabel", speedFrame)
 speedTitle.Size = UDim2.new(1,0,0,12); speedTitle.Position = UDim2.new(0,0,0,4)
-speedTitle.BackgroundTransparency = 1; speedTitle.Font = Enum.Font.GothamBold
-speedTitle.Text = "CUCUMBER"; speedTitle.TextColor3 = C.colAccent2
+speedTitle.BackgroundTransparency = 1
+speedTitle.Font = Enum.Font.GothamBold
+speedTitle.Text = "CUCUMBER"
+speedTitle.TextColor3 = C.colAccent2
 speedTitle.TextSize = 9
 
 local speedTxt = Instance.new("TextLabel", speedFrame)
 speedTxt.Size = UDim2.new(1,0,0,30); speedTxt.Position = UDim2.new(0,0,0,16)
 speedTxt.BackgroundTransparency = 1
 speedTxt.Font = Enum.Font.GothamBlack
-speedTxt.Text = "0.0"; speedTxt.TextColor3 = C.colAccent; speedTxt.TextSize = 24
+speedTxt.Text = "0.0"
+speedTxt.TextColor3 = C.colAccent
+speedTxt.TextSize = 24
 
 local speedBarBg = Instance.new("Frame", speedFrame)
 speedBarBg.Size = UDim2.new(1,-16,0,5); speedBarBg.Position = UDim2.new(0,8,1,-12)
@@ -1036,9 +1075,20 @@ speedBarBg.Visible = C.showSpeedBar
 Instance.new("UICorner", speedBarBg).CornerRadius = UDim.new(1,0)
 
 local speedBarFill = Instance.new("Frame", speedBarBg)
-speedBarFill.Size = UDim2.new(0,0,1,0); speedBarFill.BackgroundColor3 = C.colAccent
+speedBarFill.Size = UDim2.new(0,0,1,0)
+speedBarFill.BackgroundColor3 = C.colAccent
 speedBarFill.BorderSizePixel = 0
 Instance.new("UICorner", speedBarFill).CornerRadius = UDim.new(1,0)
+
+-- max speed
+local maxLbl = Instance.new("TextLabel", speedFrame)
+maxLbl.Size = UDim2.new(1,0,0,10); maxLbl.Position = UDim2.new(0,0,1,-22)
+maxLbl.BackgroundTransparency = 1
+maxLbl.Font = Enum.Font.GothamBold
+maxLbl.Text = "max 0.0"
+maxLbl.TextColor3 = C.colAccent2
+maxLbl.TextSize = 9
+maxLbl.Visible = C.showMaxSpeed
 
 -- FPS / ping
 local infoFrame = Instance.new("Frame", hud)
@@ -1055,6 +1105,15 @@ infoLbl.Text = "FPS -- | PING --"
 infoLbl.TextColor3 = C.colAccent2
 infoLbl.TextSize = 10
 
+-- streak
+local streakLbl = Instance.new("TextLabel", hud)
+streakLbl.Size = UDim2.new(0,200,0,28); streakLbl.Position = UDim2.new(0.5,-100,0,116)
+streakLbl.BackgroundTransparency = 1
+streakLbl.Font = Enum.Font.GothamBlack
+streakLbl.Text = ""; streakLbl.TextColor3 = C.colAccent
+streakLbl.TextSize = 22
+streakLbl.Visible = C.showStreak
+
 -- keybinds
 local keysFrame = Instance.new("Frame", hud)
 keysFrame.Size = UDim2.new(0,380,0,40); keysFrame.Position = UDim2.new(0.5,-190,1,-70)
@@ -1067,17 +1126,19 @@ keysLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local function makeKeyBadge(text, order)
     local box = Instance.new("Frame", keysFrame)
-    box.Size = UDim2.new(0,34,0,34); box.BackgroundColor3 = Color3.fromRGB(8,12,8)
-    box.BackgroundTransparency = 0.45; box.BorderSizePixel = 0
+    box.Size = UDim2.new(0,34,0,34)
+    box.BackgroundColor3 = Color3.fromRGB(8,12,8)
+    box.BackgroundTransparency = 0.45
+    box.BorderSizePixel = 0
     box.LayoutOrder = order
     Instance.new("UICorner", box).CornerRadius = UDim.new(0,6)
     local st = Instance.new("UIStroke", box)
     st.Color = Color3.fromRGB(230,240,230); st.Thickness = 1.5; st.Transparency = 0.6
     local lbl = Instance.new("TextLabel", box)
     lbl.Size = UDim2.new(1,0,1,0); lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.GothamBold; lbl.Text = text
-    lbl.TextColor3 = Color3.fromRGB(230,240,230); lbl.TextSize = 13
-    return {box = box, stroke = st, label = lbl}
+    lbl.Font = Enum.Font.GothamBold
+    lbl.Text = text; lbl.TextColor3 = Color3.fromRGB(230,240,230); lbl.TextSize = 13
+    return {box=box, stroke=st, label=lbl}
 end
 
 local kbSpace = makeKeyBadge("SPC", 1)
@@ -1090,13 +1151,13 @@ local kbD     = makeKeyBadge("D", 7)
 local kbV     = makeKeyBadge("V", 8)
 local kbX     = makeKeyBadge("X", 9)
 
-local function setKey(badge, on)
-    if not badge then return end
+local function setKey(b, on)
+    if not b then return end
     local c = C.colAccent
-    badge.stroke.Color = on and c or Color3.fromRGB(230,240,230)
-    badge.stroke.Transparency = on and 0 or 0.6
-    badge.label.TextColor3 = on and c or Color3.fromRGB(230,240,230)
-    badge.box.BackgroundTransparency = on and 0.25 or 0.45
+    b.stroke.Color = on and c or Color3.fromRGB(230,240,230)
+    b.stroke.Transparency = on and 0 or 0.6
+    b.label.TextColor3 = on and c or Color3.fromRGB(230,240,230)
+    b.box.BackgroundTransparency = on and 0.25 or 0.45
 end
 
 -- ============================================================
@@ -1137,7 +1198,7 @@ corner(glow, 16)
 
 local menu = Instance.new("Frame", gui)
 menu.Name = "MainFrame"
-menu.Size = UDim2.new(0, MW, 0, MH)
+menu.Size = UDim2.new(0, MW, 0, 0)
 menu.Position = UDim2.new(0.5, -MW/2, 0.5, -MH/2)
 menu.BackgroundColor3 = Color3.fromRGB(10,14,10)
 menu.BorderSizePixel = 0
@@ -1155,22 +1216,30 @@ headerBg.BorderSizePixel = 0
 
 local title = Instance.new("TextLabel", headerBg)
 title.Size = UDim2.new(1,-60,0,30); title.Position = UDim2.new(0,16,0,8)
-title.BackgroundTransparency = 1; title.Font = Enum.Font.GothamBlack
-title.Text = "CUCUMBER"; title.TextColor3 = C.colAccent; title.TextSize = 22
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBlack
+title.Text = "CUCUMBER"
+title.TextColor3 = C.colAccent
+title.TextSize = 22
 title.TextXAlignment = Enum.TextXAlignment.Left
 
 local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
-subtitle.BackgroundTransparency = 1; subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v19 public release  •  RightShift menu"
-subtitle.TextColor3 = C.colAccent2; subtitle.TextSize = 10
+subtitle.BackgroundTransparency = 1
+subtitle.Font = Enum.Font.Gotham
+subtitle.Text = "v20  •  кайф edition"
+subtitle.TextColor3 = C.colAccent2
+subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
 
 local closeBtn = Instance.new("TextButton", headerBg)
 closeBtn.Size = UDim2.new(0,30,0,30); closeBtn.Position = UDim2.new(1,-40,0,13)
-closeBtn.BackgroundColor3 = Color3.fromRGB(20,28,20); closeBtn.BorderSizePixel = 0
-closeBtn.Font = Enum.Font.GothamBold; closeBtn.Text = "×"
-closeBtn.TextColor3 = Color3.fromRGB(100,140,100); closeBtn.TextSize = 18
+closeBtn.BackgroundColor3 = Color3.fromRGB(20,28,20)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(100,140,100)
+closeBtn.TextSize = 18
 closeBtn.AutoButtonColor = false
 corner(closeBtn, 6)
 
@@ -1197,11 +1266,14 @@ local tabButtons = {}
 local function createPage(name)
     local page = Instance.new("ScrollingFrame")
     page.Name = name; page.Size = UDim2.new(1,0,1,0)
-    page.BackgroundTransparency = 1; page.BorderSizePixel = 0
-    page.ScrollBarThickness = 4; page.ScrollBarImageColor3 = C.colAccent
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 4
+    page.ScrollBarImageColor3 = C.colAccent
     page.CanvasSize = UDim2.new(0,0,0,0)
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.Visible = false; page.Parent = content
+    page.Visible = false
+    page.Parent = content
     local layout = Instance.new("UIListLayout", page)
     layout.Padding = UDim.new(0,8)
     pages[name] = {frame = page}
@@ -1212,11 +1284,15 @@ local function createTabButton(name, order)
     local btn = Instance.new("TextButton", sidebar)
     btn.Name = name; btn.Size = UDim2.new(1,0,0,32)
     btn.BackgroundColor3 = Color3.fromRGB(20,28,20)
-    btn.BackgroundTransparency = 1; btn.BorderSizePixel = 0
-    btn.Font = Enum.Font.GothamBold; btn.Text = name
-    btn.TextColor3 = Color3.fromRGB(100,140,100); btn.TextSize = 12
+    btn.BackgroundTransparency = 1
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(100,140,100)
+    btn.TextSize = 12
     btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = false; btn.LayoutOrder = order
+    btn.AutoButtonColor = false
+    btn.LayoutOrder = order
     corner(btn, 5); pad(btn, 10)
     tabButtons[name] = btn
     return btn
@@ -1235,7 +1311,7 @@ local function selectTab(name)
     currentTab = name
 end
 
-local function makeToggle(parent, label, key, onChange)
+local function makeToggle(parent, label, key, onChange, silent)
     local row = Instance.new("Frame", parent)
     row.Size = UDim2.new(1,0,0,30); row.BackgroundTransparency = 1
     local lbl = Instance.new("TextLabel", row)
@@ -1258,20 +1334,21 @@ local function makeToggle(parent, label, key, onChange)
     btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1; btn.Text = ""
     local function update()
         local on = C[key]
-        Tween:Create(track, TweenInfo.new(0.2), {
-            BackgroundColor3 = on and C.colAccent or Color3.fromRGB(40,60,40)}):Play()
-        Tween:Create(knob, TweenInfo.new(0.2), {
-            Position = on and UDim2.new(1,-18,0.5,-8) or UDim2.new(0,2,0.5,-8)}):Play()
+        Tween:Create(track, TweenInfo.new(0.18), {BackgroundColor3 = on and C.colAccent or Color3.fromRGB(40,60,40)}):Play()
+        Tween:Create(knob, TweenInfo.new(0.18), {Position = on and UDim2.new(1,-18,0.5,-8) or UDim2.new(0,2,0.5,-8)}):Play()
     end
     btn.MouseButton1Click:Connect(function()
         C[key] = not C[key]
         update()
+        if not silent then
+            if C[key] then sndOn() else sndOff() end
+        end
         if onChange then
             local ok, err = pcall(onChange, C[key])
-            if not ok then warn("[CUCUMBER] toggle callback error: " .. tostring(err)) end
+            if not ok then warn("[CUCUMBER] toggle error: " .. tostring(err)) end
         end
     end)
-    return row
+    return row, update
 end
 
 local function makeSlider(parent, label, key, min, max, suffix)
@@ -1281,22 +1358,28 @@ local function makeSlider(parent, label, key, min, max, suffix)
     top.Size = UDim2.new(1,0,0,20); top.BackgroundTransparency = 1
     local lbl = Instance.new("TextLabel", top)
     lbl.Size = UDim2.new(0.7,0,1,0); lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.Gotham; lbl.Text = label
-    lbl.TextColor3 = Color3.fromRGB(230,240,230); lbl.TextSize = 13
+    lbl.Font = Enum.Font.Gotham
+    lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(230,240,230)
+    lbl.TextSize = 13
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     local val = Instance.new("TextLabel", top)
     val.Size = UDim2.new(0.3,0,1,0); val.Position = UDim2.new(0.7,0,0,0)
-    val.BackgroundTransparency = 1; val.Font = Enum.Font.GothamBold
+    val.BackgroundTransparency = 1
+    val.Font = Enum.Font.GothamBold
     val.Text = tostring(C[key]) .. (suffix or "")
-    val.TextColor3 = C.colAccent; val.TextSize = 13
+    val.TextColor3 = C.colAccent
+    val.TextSize = 13
     val.TextXAlignment = Enum.TextXAlignment.Right
     local bar = Instance.new("Frame", row)
     bar.Size = UDim2.new(1,0,0,6); bar.Position = UDim2.new(0,0,0,28)
-    bar.BackgroundColor3 = Color3.fromRGB(40,60,40); bar.BorderSizePixel = 0
+    bar.BackgroundColor3 = Color3.fromRGB(40,60,40)
+    bar.BorderSizePixel = 0
     corner(bar, 3)
     local fill = Instance.new("Frame", bar)
     fill.Size = UDim2.new((C[key]-min)/(max-min),0,1,0)
-    fill.BackgroundColor3 = C.colAccent; fill.BorderSizePixel = 0
+    fill.BackgroundColor3 = C.colAccent
+    fill.BorderSizePixel = 0
     corner(fill, 3)
     local btn = Instance.new("TextButton", row)
     btn.Size = UDim2.new(1,0,0,20); btn.Position = UDim2.new(0,0,0,20)
@@ -1330,19 +1413,24 @@ local function makeButton(parent, label, callback, color)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1,0,0,32)
     btn.BackgroundColor3 = Color3.fromRGB(20,28,20)
-    btn.BorderSizePixel = 0; btn.Font = Enum.Font.GothamBold
-    btn.Text = label; btn.TextColor3 = color or Color3.fromRGB(230,240,230)
-    btn.TextSize = 12; btn.AutoButtonColor = false
-    corner(btn, 5); stroke(btn, Color3.fromRGB(40,60,40), 1, 0.3)
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = label
+    btn.TextColor3 = color or Color3.fromRGB(230,240,230)
+    btn.TextSize = 12
+    btn.AutoButtonColor = false
+    corner(btn, 5)
+    stroke(btn, Color3.fromRGB(40,60,40), 1, 0.3)
     btn.MouseEnter:Connect(function()
-        Tween:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = C.colAccent}):Play()
+        Tween:Create(btn, TweenInfo.new(0.12), {BackgroundColor3 = C.colAccent}):Play()
         btn.TextColor3 = Color3.fromRGB(10,14,10)
     end)
     btn.MouseLeave:Connect(function()
-        Tween:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(20,28,20)}):Play()
+        Tween:Create(btn, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(20,28,20)}):Play()
         btn.TextColor3 = color or Color3.fromRGB(230,240,230)
     end)
     btn.MouseButton1Click:Connect(function()
+        sndClick()
         local ok, err = pcall(callback)
         if not ok then warn("[CUCUMBER] button error: " .. tostring(err)) end
     end)
@@ -1351,21 +1439,24 @@ end
 
 local function makeLabel(parent, text)
     local lbl = Instance.new("TextLabel", parent)
-    lbl.Size = UDim2.new(1,0,0,20); lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.GothamBold; lbl.Text = text
-    lbl.TextColor3 = C.colAccent2; lbl.TextSize = 10
+    lbl.Size = UDim2.new(1,0,0,20)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamBold
+    lbl.Text = text
+    lbl.TextColor3 = C.colAccent2
+    lbl.TextSize = 10
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     return lbl
 end
 
 -- ============ PAGES ============
-local pageMove = createPage("Movement")
-local pageAir  = createPage("Air")
-local pageEdge = createPage("Edge")
+local pageMove  = createPage("Movement")
+local pageAir   = createPage("Air")
+local pageEdge  = createPage("Edge")
 local pageSkate = createPage("Skate")
-local pageHUD  = createPage("HUD")
-local pageKeys = createPage("Keybinds")
-local pageMisc = createPage("Settings")
+local pageHUD   = createPage("HUD")
+local pageKeys  = createPage("Keybinds")
+local pageMisc  = createPage("Settings")
 
 local tabMove  = createTabButton("Movement", 1)
 local tabAir   = createTabButton("Air", 2)
@@ -1375,15 +1466,15 @@ local tabHUD   = createTabButton("HUD", 5)
 local tabKeys  = createTabButton("Keybinds", 6)
 local tabMisc  = createTabButton("Settings", 7)
 
-tabMove.MouseButton1Click:Connect(function() selectTab("Movement") end)
-tabAir.MouseButton1Click:Connect(function() selectTab("Air") end)
-tabEdge.MouseButton1Click:Connect(function() selectTab("Edge") end)
-tabSkate.MouseButton1Click:Connect(function() selectTab("Skate") end)
-tabHUD.MouseButton1Click:Connect(function() selectTab("HUD") end)
-tabKeys.MouseButton1Click:Connect(function() selectTab("Keybinds") end)
-tabMisc.MouseButton1Click:Connect(function() selectTab("Settings") end)
+tabMove.MouseButton1Click:Connect(function() sndClick(); selectTab("Movement") end)
+tabAir.MouseButton1Click:Connect(function() sndClick(); selectTab("Air") end)
+tabEdge.MouseButton1Click:Connect(function() sndClick(); selectTab("Edge") end)
+tabSkate.MouseButton1Click:Connect(function() sndClick(); selectTab("Skate") end)
+tabHUD.MouseButton1Click:Connect(function() sndClick(); selectTab("HUD") end)
+tabKeys.MouseButton1Click:Connect(function() sndClick(); selectTab("Keybinds") end)
+tabMisc.MouseButton1Click:Connect(function() sndClick(); selectTab("Settings") end)
 
--- ===== Movement =====
+-- Movement
 makeLabel(pageMove, "MASTER")
 makeToggle(pageMove, "Movement enabled", "moveEnabled")
 makeLabel(pageMove, "BHOP")
@@ -1394,8 +1485,9 @@ makeLabel(pageMove, "SLIDE (C)")
 makeToggle(pageMove, "Enable slide", "slideEnabled")
 makeSlider(pageMove, "Slide power", "slidePower", 20, 100, "")
 makeSlider(pageMove, "Slide duration", "slideDuration", 0.2, 2.0, "s")
+makeToggle(pageMove, "Camera tilt on slide", "slideCamTilt")
 
--- ===== Air =====
+-- Air
 makeLabel(pageAir, "AIR STRAFE")
 makeToggle(pageAir, "Autostrafe (Shift)", "autostrafeEnabled")
 makeSlider(pageAir, "Air accel", "autostrafeAccel", 20, 200, "")
@@ -1404,10 +1496,10 @@ makeLabel(pageAir, "PIXEL GLIDE")
 makeSlider(pageAir, "Glide control", "glideControl", 2, 25, "")
 makeToggle(pageAir, "Auto surf lock", "autoSurfEnabled")
 makeLabel(pageAir, "DOUBLE JUMP")
-makeToggle(pageAir, "Enable double jump (Space in air)", "doubleJumpEnabled")
+makeToggle(pageAir, "Enable double jump", "doubleJumpEnabled")
 makeSlider(pageAir, "Double jump power", "doubleJumpPower", 10, 80, "")
 
--- ===== Edge =====
+-- Edge
 makeLabel(pageEdge, "EDGEJUMP")
 makeToggle(pageEdge, "Enable edgejump", "edgeJumpEnabled")
 makeSlider(pageEdge, "Jump power", "edgeJumpPower", 5, 60, "")
@@ -1417,18 +1509,20 @@ makeToggle(pageEdge, "Enable edgebug", "edgebugEnabled")
 makeSlider(pageEdge, "Look dist", "edgebugLookDist", 1, 8, "st")
 makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end)
 
--- ===== Skate =====
+-- Skate
 makeLabel(pageSkate, "SKATEBOARD")
-makeButton(pageSkate, "TOGGLE BOARD (X)", function() toggleBoard() end)
+makeButton(pageSkate, "TOGGLE BOARD (X)", toggleBoard)
 makeToggle(pageSkate, "Underglow", "skateUnderglow", function(v)
     if Skate.underglowLight then Skate.underglowLight.Enabled = v end
 end)
 makeLabel(pageSkate, "CONTROLS")
 local sInfo = Instance.new("TextLabel", pageSkate)
-sInfo.Size = UDim2.new(1,0,0,80); sInfo.BackgroundTransparency = 1
+sInfo.Size = UDim2.new(1,0,0,80)
+sInfo.BackgroundTransparency = 1
 sInfo.Font = Enum.Font.Gotham
 sInfo.Text = "Space ground = OLLIE\nSpace air = KICKFLIP\nQ = SHOVE-IT | E = HEELFLIP"
-sInfo.TextColor3 = Color3.fromRGB(100,140,100); sInfo.TextSize = 11
+sInfo.TextColor3 = Color3.fromRGB(100,140,100)
+sInfo.TextSize = 11
 sInfo.TextXAlignment = Enum.TextXAlignment.Left
 sInfo.TextYAlignment = Enum.TextYAlignment.Top
 sInfo.TextWrapped = true
@@ -1436,33 +1530,44 @@ makeLabel(pageSkate, "TUNING")
 makeSlider(pageSkate, "Pop power", "skatePopPower", 5, 60, "")
 makeSlider(pageSkate, "Flip duration", "skateFlipTime", 0.2, 1.0, "s")
 
--- ===== HUD =====
-makeLabel(pageHUD, "SPEED DISPLAY")
+-- HUD
+makeLabel(pageHUD, "SPEED")
 makeToggle(pageHUD, "Show speed", "showSpeed", function(v) speedFrame.Visible = v end)
 makeToggle(pageHUD, "Show speed bar", "showSpeedBar", function(v) speedBarBg.Visible = v end)
+makeToggle(pageHUD, "Show max speed", "showMaxSpeed", function(v) maxLbl.Visible = v end)
+makeToggle(pageHUD, "Show bhop streak", "showStreak", function(v) streakLbl.Visible = v end)
 makeLabel(pageHUD, "INFO")
 makeToggle(pageHUD, "Show FPS + Ping", "showFPS", function(v) infoFrame.Visible = v end)
 makeToggle(pageHUD, "Show keybinds", "showMidKeys", function(v) keysFrame.Visible = v end)
 
--- ===== Keybinds =====
+-- Keybinds
 makeLabel(pageKeys, "CLICK A BUTTON, THEN PRESS A KEY")
 
 local function makeKeybindRow(parent, label, keyName)
     local row = Instance.new("Frame", parent)
-    row.Size = UDim2.new(1,0,0,32); row.BackgroundTransparency = 1
+    row.Size = UDim2.new(1,0,0,32)
+    row.BackgroundTransparency = 1
     local lbl = Instance.new("TextLabel", row)
-    lbl.Size = UDim2.new(1,-100,1,0); lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.Gotham; lbl.Text = label
-    lbl.TextColor3 = Color3.fromRGB(230,240,230); lbl.TextSize = 13
+    lbl.Size = UDim2.new(1,-100,1,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(230,240,230)
+    lbl.TextSize = 13
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     local btn = Instance.new("TextButton", row)
     btn.Size = UDim2.new(0,90,0,26); btn.Position = UDim2.new(1,-90,0.5,-13)
-    btn.BackgroundColor3 = Color3.fromRGB(20,28,20); btn.BorderSizePixel = 0
+    btn.BackgroundColor3 = Color3.fromRGB(20,28,20)
+    btn.BorderSizePixel = 0
     btn.Font = Enum.Font.GothamBold
     btn.Text = C[keyName] and C[keyName].Name or "?"
-    btn.TextColor3 = C.colAccent; btn.TextSize = 12; btn.AutoButtonColor = false
-    corner(btn, 5); stroke(btn, Color3.fromRGB(40,60,40), 1, 0.3)
+    btn.TextColor3 = C.colAccent
+    btn.TextSize = 12
+    btn.AutoButtonColor = false
+    corner(btn, 5)
+    stroke(btn, Color3.fromRGB(40,60,40), 1, 0.3)
     btn.MouseButton1Click:Connect(function()
+        sndClick()
         btn.Text = "..."
         btn.TextColor3 = Color3.fromRGB(255,200,80)
         local conn
@@ -1494,92 +1599,91 @@ makeKeybindRow(pageKeys, "Skate heelflip", "skateHeelKey")
 makeKeybindRow(pageKeys, "Menu", "menuKey")
 makeKeybindRow(pageKeys, "Mouse unlock", "mouseKey")
 
--- ===== Settings =====
+-- Settings
 makeLabel(pageMisc, "THEME")
 local themeRow = Instance.new("Frame", pageMisc)
 themeRow.Size = UDim2.new(1,0,0,30); themeRow.BackgroundTransparency = 1
 local themeNames = {"green","cyan","red","purple","pink"}
-local tw = 62
+local themeBtns = {}
 for i, tname in ipairs(themeNames) do
     local b = Instance.new("TextButton", themeRow)
-    b.Size = UDim2.new(0,tw,1,0); b.Position = UDim2.new(0,(i-1)*(tw+4),0,0)
+    b.Size = UDim2.new(0,50,0,26)
+    b.Position = UDim2.new(0,(i-1)*56,0.5,-13)
     b.BackgroundColor3 = THEMES[tname].accent
     b.BorderSizePixel = 0
-    b.Font = Enum.Font.GothamBold; b.Text = string.sub(tname,1,3):upper()
-    b.TextColor3 = Color3.fromRGB(10,14,10); b.TextSize = 11
+    b.Font = Enum.Font.GothamBold
+    b.Text = ""
     b.AutoButtonColor = false
-    corner(b, 5)
+    corner(b, 13)
+    local chk = Instance.new("TextLabel", b)
+    chk.Size = UDim2.new(1,0,1,0)
+    chk.BackgroundTransparency = 1
+    chk.Font = Enum.Font.GothamBold
+    chk.Text = (C.theme == tname) and "✓" or ""
+    chk.TextColor3 = Color3.fromRGB(10,14,10)
+    chk.TextSize = 16
+    table.insert(themeBtns, {btn = b, name = tname, check = chk})
     b.MouseButton1Click:Connect(function()
+        sndClick()
         C.theme = tname
         applyTheme(tname)
-        -- update UI colors
-        speedStroke.Color = C.colAccent
-        speedTxt.TextColor3 = C.colAccent
-        speedBarFill.BackgroundColor3 = C.colAccent
-        speedTitle.TextColor3 = C.colAccent2
-        infoLbl.TextColor3 = C.colAccent2
-        title.TextColor3 = C.colAccent
-        subtitle.TextColor3 = C.colAccent2
-        topLine.BackgroundColor3 = C.colAccent
-        glow.BackgroundColor3 = C.colAccent
-        -- re-select tab to refresh colors
-        if currentTab then selectTab(currentTab) end
+        notify("Theme → " .. tname, C.colAccent)
+        for _, t in ipairs(themeBtns) do
+            t.check.Text = (t.name == tname) and "✓" or ""
+        end
     end)
 end
 
-makeLabel(pageMisc, "CONFIG")
-makeButton(pageMisc, "Save config", function()
-    if saveConfig() then
-        print("[CUCUMBER] config saved")
-    else
-        warn("[CUCUMBER] config save failed (no file access)")
-    end
-end)
-makeButton(pageMisc, "Load config", function()
-    if loadConfig() then
-        applyTheme(C.theme)
-        print("[CUCUMBER] config loaded")
-    else
-        warn("[CUCUMBER] config load failed")
-    end
-end)
+makeLabel(pageMisc, "SOUNDS")
+makeToggle(pageMisc, "Enable UI sounds", "soundEnabled")
+makeSlider(pageMisc, "Sound volume", "soundVolume", 0, 1, "")
 
 makeLabel(pageMisc, "PROFILES")
+makeButton(pageMisc, "Recommended (рекомендую)", function()
+    applyRecommended()
+    notify("Recommended loaded", C.colAccent)
+end)
 makeButton(pageMisc, "Minimal (bhop only)", function()
     C.fxTrail = false; C.fxParticles = false; C.fxFootSparks = false
     C.fxFOVKick = false; C.fxSound = false; C.fxMotionBlur = false
-    C.fxRainbow = false
-    C.autostrafeEnabled = false
-    C.slideEnabled = false
-    C.doubleJumpEnabled = false
-    C.edgeJumpEnabled = false
+    C.fxRainbow = false; C.fxLandingShake = false
+    C.autostrafeEnabled = false; C.slideEnabled = false
+    C.doubleJumpEnabled = false; C.edgeJumpEnabled = false
     C.edgebugEnabled = false
     refreshFX()
-end)
-makeButton(pageMisc, "Balanced", function()
-    C.fxTrail = false; C.fxParticles = false; C.fxFootSparks = true
-    C.fxFOVKick = false; C.fxSound = false; C.fxMotionBlur = false
-    C.fxRainbow = false
-    C.autostrafeEnabled = true
-    C.slideEnabled = true
-    C.doubleJumpEnabled = false
-    C.edgeJumpEnabled = true
-    C.edgebugEnabled = true
-    refreshFX()
+    notify("Minimal loaded", C.colAccent)
 end)
 makeButton(pageMisc, "Full FX", function()
     C.fxTrail = true; C.fxParticles = true; C.fxFootSparks = true
     C.fxFOVKick = true; C.fxSound = true; C.fxMotionBlur = true
-    C.fxRainbow = false
-    C.autostrafeEnabled = true
-    C.slideEnabled = true
-    C.edgeJumpEnabled = true
-    C.edgebugEnabled = true
+    C.fxRainbow = false; C.fxLandingShake = true
+    C.autostrafeEnabled = true; C.slideEnabled = true
+    C.edgeJumpEnabled = true; C.edgebugEnabled = true
     refreshFX()
+    notify("Full FX loaded", C.colAccent)
 end)
 
-makeLabel(pageMisc, "UTILITIES")
+makeLabel(pageMisc, "CONFIG")
+makeButton(pageMisc, "Save config", function()
+    notify(saveConfig() and "Saved" or "Save failed (no file IO)", C.colAccent)
+end)
+makeButton(pageMisc, "Load config", function()
+    if loadConfig() then
+        applyTheme(C.theme)
+        notify("Config loaded", C.colAccent)
+    else
+        notify("Load failed", Color3.fromRGB(255,90,100))
+    end
+end)
+makeButton(pageMisc, "Reset to recommended", function()
+    applyRecommended()
+    saveConfig()
+    notify("Reset to recommended", C.colAccent)
+end)
+
+makeLabel(pageMisc, "UTILITY")
 makeToggle(pageMisc, "Anti-AFK", "antiAfkEnabled")
+makeToggle(pageMisc, "Landing screen shake", "fxLandingShake")
 makeButton(pageMisc, "Respawn to spawn", function()
     if hrp then hrp.CFrame = CFrame.new(spawnPos); vel = Vector3.zero end
 end)
@@ -1594,7 +1698,9 @@ do
     local dragging, dragStart, startPos
     titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true; dragStart = input.Position; startPos = menu.Position
+            dragging = true
+            dragStart = input.Position
+            startPos = menu.Position
         end
     end)
     UIS.InputChanged:Connect(function(input)
@@ -1643,13 +1749,29 @@ UIS.InputEnded:Connect(function(input)
 end)
 
 local function openMenu()
-    menuOpen = true; menu.Visible = true; glow.Visible = true
+    menuOpen = true
+    menu.Visible = true
+    glow.Visible = true
+    menu.Size = UDim2.new(0, MW, 0, 0)
+    Tween:Create(menu, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, MW, 0, MH),
+    }):Play()
     UIS.MouseBehavior = Enum.MouseBehavior.Default
     UIS.MouseIconEnabled = true
     if currentTab == nil then selectTab("Movement") end
+    sndClick()
 end
 local function closeMenu()
-    menuOpen = false; menu.Visible = false; glow.Visible = false
+    menuOpen = false
+    Tween:Create(menu, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, MW, 0, 0),
+    }):Play()
+    task.delay(0.18, function()
+        if not menuOpen then
+            menu.Visible = false
+            glow.Visible = false
+        end
+    end)
     if not mouseUnlocked then
         UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
     end
@@ -1670,15 +1792,10 @@ closeBtn.MouseLeave:Connect(function()
         TextColor3 = Color3.fromRGB(100,140,100)}):Play()
 end)
 
--- menu key listener (dynamic)
 UIS.InputBegan:Connect(function(i, gp)
     if gp then return end
-    if i.KeyCode == C.menuKey then
-        toggleMenu()
-    end
+    if i.KeyCode == C.menuKey then toggleMenu() end
 end)
-
--- unload key
 UIS.InputBegan:Connect(function(i, gp)
     if gp then return end
     if i.KeyCode == C.unloadKey then
@@ -1687,7 +1804,7 @@ UIS.InputBegan:Connect(function(i, gp)
 end)
 
 -- ============================================================
--- UNLOAD FUNCTION
+-- UNLOAD
 -- ============================================================
 _G.__CUCUMBER_UNLOAD = function()
     _G.__CUCUMBER_LOADED = false
@@ -1700,6 +1817,7 @@ _G.__CUCUMBER_UNLOAD = function()
     pcall(function() if footSparks then footSparks:Destroy() end end)
     pcall(function() if hud then hud:Destroy() end end)
     pcall(function() if gui then gui:Destroy() end end)
+    pcall(function() if notifGui then notifGui:Destroy() end end)
     pcall(function() if splash then splash:Destroy() end end)
     print("[CUCUMBER] unloaded")
 end
@@ -1707,28 +1825,37 @@ end
 -- ============================================================
 -- INIT
 -- ============================================================
-loadConfig()
+local hadConfig = loadConfig()
+if not hadConfig and HAS_FILE_IO then
+    -- first launch — apply recommended
+    applyRecommended()
+end
 applyTheme(C.theme)
 if cam then cam.FieldOfView = 90 end
 selectTab("Movement")
 
+notify("CUCUMBER v20 loaded", C.colAccent)
+
 -- ============================================================
--- HUD UPDATE LOOP
+-- HUD LOOP
 -- ============================================================
 local fpsCount = 0
 local fpsTime = tick()
 local currentFPS = 60
 local lastPingUpdate = 0
 local currentPing = 0
+local lastMaxNotified = 0
 
-RS.RenderStepped:Connect(function()
+RS.RenderStepped:Connect(function(dt)
     if not _G.__CUCUMBER_LOADED then return end
     if not hrp or not hrp.Parent then return end
 
-    -- speed
     local v = hrp.AssemblyLinearVelocity
     local spd = Vector3.new(v.X, v.Z).Magnitude
-    speedTxt.Text = string.format("%.1f", spd)
+
+    -- smooth interpolation for speed number
+    smoothedSpeed = smoothedSpeed + (spd - smoothedSpeed) * math.min(dt * 12, 1)
+    speedTxt.Text = string.format("%.1f", smoothedSpeed)
 
     local col = C.colAccent
     if spd > 50 then col = Color3.fromRGB(230,230,100) end
@@ -1737,9 +1864,17 @@ RS.RenderStepped:Connect(function()
     speedBarFill.BackgroundColor3 = col
     speedBarFill.Size = UDim2.new(math.clamp(spd/120, 0, 1), 0, 1, 0)
 
-    if spd > maxSpeedSession then maxSpeedSession = spd end
+    if spd > maxSpeedSession then
+        maxSpeedSession = spd
+        if maxSpeedSession > 60 and tick() - lastMaxNotified > 3 then
+            lastMaxNotified = tick()
+            -- small feedback on new max
+            sndNotify()
+        end
+    end
+    maxLbl.Text = string.format("max %.1f", maxSpeedSession)
 
-    -- FPS counter
+    -- FPS
     fpsCount = fpsCount + 1
     local now = tick()
     if now - fpsTime >= 0.5 then
@@ -1747,8 +1882,6 @@ RS.RenderStepped:Connect(function()
         fpsCount = 0
         fpsTime = now
     end
-
-    -- ping
     if now - lastPingUpdate > 1 then
         lastPingUpdate = now
         pcall(function()
@@ -1760,7 +1893,18 @@ RS.RenderStepped:Connect(function()
         infoLbl.Text = string.format("FPS %d | PING %d", currentFPS, currentPing)
     end
 
-    -- keybinds
+    -- streak
+    if C.showStreak and bhopStreak > 0 then
+        streakLbl.Text = "x" .. bhopStreak
+        local sc = C.colAccent
+        if bhopStreak >= 10 then sc = Color3.fromRGB(230,230,100) end
+        if bhopStreak >= 20 then sc = Color3.fromRGB(255,90,100) end
+        streakLbl.TextColor3 = sc
+    else
+        streakLbl.Text = ""
+    end
+
+    -- keys
     setKey(kbSpace, UIS:IsKeyDown(C.bhopKey))
     setKey(kbCtrl,  UIS:IsKeyDown(C.edgeJumpKey))
     setKey(kbShift, UIS:IsKeyDown(C.autostrafeKey))
@@ -1776,4 +1920,4 @@ game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v19 loaded successfully")
+print("[CUCUMBER] v20 loaded")
