@@ -1,8 +1,7 @@
--- CUCUMBER Movement — v14 (skateboard, kickflip, ollie)
+-- CUCUMBER Movement — v15 (fixed menu, все вкладки в сайдбаре)
 -- RightShift = меню | End = unload
 -- Space (hold) = bhop | LeftCtrl + Space (air) = edgejump
--- V (hold in air) = pixel-glide
--- LeftShift в воздухе = autostrafe
+-- V (hold in air) = pixel-glide | LeftShift в воздухе = autostrafe
 -- Skate: Space on ground = ollie, Space in air = kickflip
 
 local Players = game:GetService("Players")
@@ -57,13 +56,12 @@ local C = {
 
     bhopIgnoreWalkSpeed = true,
 
-    -- SKATE
     skateEnabled   = false,
     skatePopPower  = 30,
     skateFlipTime  = 0.45,
     skateCooldown  = 0.5,
-    skateColor     = Color3.fromRGB(20, 20, 22),   -- deck
-    skateWheelCol  = Color3.fromRGB(255, 140, 40), -- wheels
+    skateColor     = Color3.fromRGB(20, 20, 22),
+    skateWheelCol  = Color3.fromRGB(255, 140, 40),
 
     fov            = 90,
     thirdPerson    = false,
@@ -348,7 +346,6 @@ local function doKickflip()
                 return
             end
         end
-        -- если прервалось
         if deck.Parent then
             deck.CFrame = hrp.CFrame * CFrame.new(0, -3.0, 0)
             local w = Instance.new("WeldConstraint")
@@ -605,7 +602,6 @@ UIS.InputBegan:Connect(function(i, gp)
     end
 end)
 
--- edgejump trigger
 UIS.InputBegan:Connect(function(i, gp)
     if gp then return end
     if not C.edgeJumpEnabled or not alive or not hrp then return end
@@ -616,7 +612,6 @@ UIS.InputBegan:Connect(function(i, gp)
     end
 end)
 
--- skate trigger: Space on ground = ollie, Space in air = kickflip
 UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if not C.skateEnabled then return end
@@ -661,7 +656,6 @@ RS.Heartbeat:Connect(function(dt)
         tryEdgebug()
     end
 
-    -- GLIDE
     local wantGlide = keyDown(C.glideKey) and not onG
     if wantGlide ~= glideOn then
         glideOn = wantGlide
@@ -719,7 +713,6 @@ RS.Heartbeat:Connect(function(dt)
         return
     end
 
-    -- AUTOSTRAFE
     if not onG and m and C.autostrafeEnabled and keyDown(C.autostrafeKey) then
         local h = Vector3.new(vel.X, 0, vel.Z)
         local curSpeed = h.Magnitude
@@ -730,7 +723,6 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- GROUND
     if onG then
         if not m and C.counterStrafeEnabled then
             local h = Vector3.new(ev.X, 0, ev.Z)
@@ -740,7 +732,6 @@ RS.Heartbeat:Connect(function(dt)
             end
         end
 
-        -- bhop авто (skate: ручной pop через Space, иначе авто)
         if keyDown(C.bhopKey) and not C.skateEnabled then
             if tick() - lastJump > C.jumpCd then
                 lastJump = tick()
@@ -749,7 +740,6 @@ RS.Heartbeat:Connect(function(dt)
                 if bhopStreak > bhopMaxStreak then bhopMaxStreak = bhopStreak end
             end
         elseif keyDown(C.bhopKey) and C.skateEnabled then
-            -- со скейтом тоже считаем streak
             if tick() - lastJump > C.jumpCd then
                 lastJump = tick()
                 bhopStreak = bhopStreak + 1
@@ -915,7 +905,7 @@ local function setKey(badge, on, color)
 end
 
 -- ============================================================
--- MENU
+-- MENU (v15 — вертикальный сайдбар, все вкладки видны)
 -- ============================================================
 local T = {
     bg      = Color3.fromRGB(10, 14, 10),
@@ -958,9 +948,11 @@ local function pad(p, n)
     u.Parent = p; return u
 end
 
+local MW, MH = 720, 500
+
 local glow = Instance.new("Frame")
-glow.Size = UDim2.new(0, 420, 0, 520)
-glow.Position = UDim2.new(0.5, -210, 0.5, -260)
+glow.Size = UDim2.new(0, MW + 20, 0, MH + 20)
+glow.Position = UDim2.new(0.5, -(MW + 20) / 2, 0.5, -(MH + 20) / 2)
 glow.BackgroundColor3 = T.accent
 glow.BackgroundTransparency = 0.95
 glow.BorderSizePixel = 0
@@ -970,8 +962,8 @@ corner(glow, 16)
 
 local menu = Instance.new("Frame")
 menu.Name = "MainFrame"
-menu.Size = UDim2.new(0, 420, 0, 520)
-menu.Position = UDim2.new(0.5, -210, 0.5, -260)
+menu.Size = UDim2.new(0, MW, 0, MH)
+menu.Position = UDim2.new(0.5, -MW / 2, 0.5, -MH / 2)
 menu.BackgroundColor3 = T.bg
 menu.BorderSizePixel = 0
 menu.Visible = false
@@ -1010,7 +1002,7 @@ subtitle.Size = UDim2.new(1, -60, 0, 14)
 subtitle.Position = UDim2.new(0, 16, 0, 34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = T.font
-subtitle.Text = "movement suite  •  v14"
+subtitle.Text = "movement suite  •  v15"
 subtitle.TextColor3 = T.dim
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -1031,37 +1023,33 @@ corner(closeBtn, 6)
 
 local titleBar = headerBg
 
-local tabBar = Instance.new("Frame")
-tabBar.Size = UDim2.new(1, 0, 0, 34)
-tabBar.Position = UDim2.new(0, 0, 0, 59)
-tabBar.BackgroundColor3 = T.panel
-tabBar.BorderSizePixel = 0
-tabBar.Parent = menu
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 130, 1, -59)
+sidebar.Position = UDim2.new(0, 0, 0, 59)
+sidebar.BackgroundColor3 = T.panel
+sidebar.BorderSizePixel = 0
+sidebar.Parent = menu
 
-local tabLine = Instance.new("Frame")
-tabLine.Size = UDim2.new(1, 0, 0, 1)
-tabLine.Position = UDim2.new(0, 0, 1, 0)
-tabLine.BackgroundColor3 = T.stroke
-tabLine.BorderSizePixel = 0
-tabLine.Parent = tabBar
-
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 2)
-tabLayout.Parent = tabBar
-pad(tabBar, 4)
+local sidebarLayout = Instance.new("UIListLayout")
+sidebarLayout.Padding = UDim.new(0, 2)
+sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+sidebarLayout.Parent = sidebar
+pad(sidebar, 6)
 
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1, -20, 1, -110)
-content.Position = UDim2.new(0, 10, 0, 100)
+content.Size = UDim2.new(1, -130, 1, -59)
+content.Position = UDim2.new(0, 130, 0, 59)
 content.BackgroundTransparency = 1
 content.Parent = menu
+pad(content, 12)
 
 local pages = {}
 local currentTab = nil
+local tabButtons = {}
 
 local function createPage(name)
     local page = Instance.new("ScrollingFrame")
+    page.Name = name
     page.Size = UDim2.new(1, 0, 1, 0)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
@@ -1073,6 +1061,7 @@ local function createPage(name)
     page.Parent = content
     local layout = Instance.new("UIListLayout")
     layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Parent = page
     pages[name] = { frame = page }
     return page
@@ -1080,19 +1069,38 @@ end
 
 local function createTabButton(name, order)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 60, 1, -8)
+    btn.Name = name
+    btn.Size = UDim2.new(1, 0, 0, 32)
     btn.BackgroundColor3 = T.panel2
     btn.BackgroundTransparency = 1
     btn.BorderSizePixel = 0
     btn.Font = T.fontB
     btn.Text = name
     btn.TextColor3 = T.dim
-    btn.TextSize = 11
+    btn.TextSize = 12
+    btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false
     btn.LayoutOrder = order
-    btn.Parent = tabBar
+    btn.Parent = sidebar
     corner(btn, 5)
+    pad(btn, 10)
+    tabButtons[name] = btn
     return btn
+end
+
+local function selectTab(name)
+    for n, p in pairs(pages) do
+        p.frame.Visible = (n == name)
+    end
+    for n, btn in pairs(tabButtons) do
+        local active = n == name
+        Tween:Create(btn, TweenInfo.new(0.15), {
+            BackgroundColor3 = active and T.accent or T.panel2,
+            BackgroundTransparency = active and 0 or 1,
+            TextColor3 = active and T.bg or T.dim,
+        }):Play()
+    end
+    currentTab = name
 end
 
 local function makeToggle(parent, label, key, onChange)
@@ -1265,7 +1273,7 @@ local function makeLabel(parent, text)
     return lbl
 end
 
--- pages
+-- ============ PAGES ============
 local pageMove   = createPage("Movement")
 local pageAir    = createPage("Air")
 local pageGlide  = createPage("Glide")
@@ -1276,34 +1284,15 @@ local pageFX     = createPage("FX")
 local pageHUD    = createPage("HUD")
 local pageMisc   = createPage("Misc")
 
-local tabMove  = createTabButton("Move", 1)
+local tabMove  = createTabButton("Movement", 1)
 local tabAir   = createTabButton("Air", 2)
 local tabGlide = createTabButton("Glide", 3)
 local tabEdge  = createTabButton("Edge", 4)
 local tabSkate = createTabButton("Skate", 5)
-local tabCam   = createTabButton("Cam", 6)
-local tabFX    = createTabButton("FX", 7)
+local tabCam   = createTabButton("Camera", 6)
+local tabFX    = createTabButton("Effects", 7)
 local tabHUD   = createTabButton("HUD", 8)
 local tabMisc  = createTabButton("Misc", 9)
-
-local function selectTab(name)
-    for n, p in pairs(pages) do
-        p.frame.Visible = (n == name)
-    end
-    local map = {
-        Movement = tabMove, Air = tabAir, Glide = tabGlide, Edge = tabEdge,
-        Skate = tabSkate, Camera = tabCam, FX = tabFX, HUD = tabHUD, Misc = tabMisc,
-    }
-    for n, btn in pairs(map) do
-        local active = n == name
-        Tween:Create(btn, TweenInfo.new(0.15), {
-            BackgroundColor3 = active and T.accent or T.panel2,
-            BackgroundTransparency = active and 0 or 1,
-            TextColor3 = active and T.bg or T.dim,
-        }):Play()
-    end
-    currentTab = name
-end
 
 tabMove.MouseButton1Click:Connect(function() selectTab("Movement") end)
 tabAir.MouseButton1Click:Connect(function() selectTab("Air") end)
@@ -1335,6 +1324,18 @@ makeSlider(pageAir, "Air max speed", "autostrafeMaxSpeed", 40, 200, "")
 makeLabel(pageGlide, "PIXEL GLIDE")
 makeSlider(pageGlide, "Glide control", "glideControl", 2, 25, "")
 makeToggle(pageGlide, "Auto surf lock", "autoSurfEnabled")
+makeLabel(pageGlide, "INFO")
+local glideInfo = Instance.new("TextLabel")
+glideInfo.Size = UDim2.new(1, 0, 0, 50)
+glideInfo.BackgroundTransparency = 1
+glideInfo.Font = T.font
+glideInfo.Text = "V (hold in air) = glide\nDirection: mouse + WASD\nSpeed preserved on entry"
+glideInfo.TextColor3 = T.dim
+glideInfo.TextSize = 11
+glideInfo.TextXAlignment = Enum.TextXAlignment.Left
+glideInfo.TextYAlignment = Enum.TextYAlignment.Top
+glideInfo.TextWrapped = true
+glideInfo.Parent = pageGlide
 
 -- Edge
 makeLabel(pageEdge, "EDGEJUMP")
@@ -1349,11 +1350,7 @@ makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end
 -- Skate
 makeLabel(pageSkate, "SKATEBOARD")
 makeToggle(pageSkate, "Enable skateboard", "skateEnabled", function(v)
-    if v then
-        attachBoard()
-    else
-        detachBoard()
-    end
+    if v then attachBoard() else detachBoard() end
 end)
 makeLabel(pageSkate, "CONTROLS")
 local skateInfo = Instance.new("TextLabel")
@@ -1401,6 +1398,7 @@ local fovRow = Instance.new("Frame")
 fovRow.Size = UDim2.new(1, 0, 0, 30)
 fovRow.BackgroundTransparency = 1
 fovRow.Parent = pageCam
+local fovBtns = {}
 local function mkFovBtn(text, value, xPos, width)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(0, width, 1, 0)
@@ -1414,16 +1412,15 @@ local function mkFovBtn(text, value, xPos, width)
     b.AutoButtonColor = false
     b.Parent = fovRow
     corner(b, 5)
+    table.insert(fovBtns, b)
     b.MouseButton1Click:Connect(function()
         C.fov = value
         fovValLbl.Text = "FOV: " .. value
         if cam then Tween:Create(cam, TweenInfo.new(0.3), { FieldOfView = value }):Play() end
-        for _, child in ipairs(fovRow:GetChildren()) do
-            if child:IsA("TextButton") then
-                local isActive = tonumber(child.Text) == value
-                child.BackgroundColor3 = isActive and T.accent or T.panel2
-                child.TextColor3 = isActive and T.bg or T.text
-            end
+        for _, child in ipairs(fovBtns) do
+            local isActive = tonumber(child.Text) == value
+            child.BackgroundColor3 = isActive and T.accent or T.panel2
+            child.TextColor3 = isActive and T.bg or T.text
         end
     end)
 end
