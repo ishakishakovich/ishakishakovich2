@@ -1,5 +1,5 @@
 -- ============================================================
--- CUCUMBER Movement — v22 (bhop boost + clean glide)
+-- CUCUMBER Movement — v23 (smooth bhop + real edgebug)
 -- RightShift = menu | Z = unlock mouse | End = unload
 -- ============================================================
 
@@ -20,7 +20,7 @@ local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 local cam  = workspace.CurrentCamera
 
-local CONFIG_FILE = "cucumber_v22.json"
+local CONFIG_FILE = "cucumber_v23.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
 
 -- ============================================================
@@ -33,8 +33,9 @@ local C = {
     jumpCd = 0.04,
     walkSpeed = 24,
     bhopIgnoreWalkSpeed = true,
-    bhopBoost = 1.15,
     bhopMaxSpeed = 60,
+    bhopAccel = 8,
+    bhopGroundKeep = 0.94,
 
     autostrafeEnabled = true,
     autostrafeKey = Enum.KeyCode.LeftShift,
@@ -51,8 +52,7 @@ local C = {
     edgeJumpUsed = 0,
     edgebugEnabled = true,
     edgebugKey = Enum.KeyCode.LeftControl,
-    edgebugLookDist = 3,
-    edgebugCooldown = 0.15,
+    edgebugCooldown = 0.1,
 
     counterStrafeEnabled = true,
     counterStrafePower = 0.88,
@@ -131,7 +131,7 @@ sSub.Size = UDim2.new(1,0,0,20)
 sSub.Position = UDim2.new(0,0,0.5,20)
 sSub.BackgroundTransparency = 1
 sSub.Font = Enum.Font.GothamBold
-sSub.Text = "v22"
+sSub.Text = "v23"
 sSub.TextColor3 = Color3.fromRGB(90,180,80)
 sSub.TextSize = 13
 sSub.TextTransparency = 1
@@ -161,7 +161,7 @@ local bhopStreak = 0
 local maxSpeedSession = 0
 local doubleJumpUsed = false
 local smoothedSpeed = 0
-local bhopSpeed = 0   -- накопленная bhop-скорость
+local bhopSpeed = 0
 
 local footSparks
 
@@ -193,13 +193,13 @@ end
 -- ============================================================
 -- HELPERS
 -- ============================================================
-local function raycastDir(dir, dist)
+local function raycastDown(maxDist)
     if not hrp then return nil end
     local p = RaycastParams.new()
     p.FilterType = Enum.RaycastFilterType.Exclude
     p.FilterDescendantsInstances = {char}
     p.IgnoreWater = true
-    return workspace:Raycast(hrp.Position, dir * dist, p)
+    return workspace:Raycast(hrp.Position, Vector3.new(0, -(maxDist or 20), 0), p)
 end
 
 local function mv()
@@ -220,25 +220,38 @@ local function edgeJump()
     hrp.AssemblyLinearVelocity = Vector3.new(cur.X, math.max(cur.Y, C.edgeJumpPower), cur.Z)
 end
 
+-- EDGEBUG: на падении при зажатом Ctrl, в 1-4 studs над землёй
+-- форсим state Running чтобы Landed не сработал → урон не проходит
 local function tryEdgebug()
     if not C.edgebugEnabled then return end
     if not keyDown(C.edgebugKey) then return end
+
+    local vy = hrp.AssemblyLinearVelocity.Y
+    if vy > -15 then return end  -- недостаточно быстро падаем
+
+    local r = raycastDown(20)
+    if not r then return end
+
+    local dist = (hrp.Position - r.Position).Magnitude
+    if dist > 4 or dist < 0.5 then return end
     if tick() - lastEdgebugAt < C.edgebugCooldown then return end
-    if not raycastDir(Vector3.new(0,-1,0), C.edgebugLookDist) then return end
-    local fwd = hrp.CFrame.LookVector
-    local f = Vector3.new(fwd.X, 0, fwd.Z)
-    if f.Magnitude < 0.01 then f = Vector3.new(0,0,-1) end
-    f = f.Unit
-    if not raycastDir(f * (C.edgebugLookDist*0.7) + Vector3.new(0,-0.5,0), 1) then return end
-    if hrp.AssemblyLinearVelocity.Y > -3 then return end
+
     lastEdgebugAt = tick()
+
+    -- обнуляем вертикаль (как в CS:GO)
     local v = hrp.AssemblyLinearVelocity
-    hrp.AssemblyLinearVelocity = Vector3.new(v.X*0.85, 0, v.Z*0.85)
-    hum:ChangeState(Enum.HumanoidStateType.Running)
-    task.delay(0.05, function()
+    hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+
+    -- форсим Running — Landed не сработает, урон не посчитается
+    pcall(function()
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end)
+
+    -- маленький буст вверх на след кадр для надёжности
+    task.delay(0.03, function()
         if alive and hrp then
             local c = hrp.AssemblyLinearVelocity
-            hrp.AssemblyLinearVelocity = Vector3.new(c.X, 5, c.Z)
+            hrp.AssemblyLinearVelocity = Vector3.new(c.X, 2, c.Z)
         end
     end)
 end
@@ -259,6 +272,7 @@ local function hookCharacter(c)
     glideOn = false
     doubleJumpUsed = false
     bhopSpeed = 0
+    bhopStreak = 0
     C.edgeJumpUsed = 0
     spawnPos = hrp.Position
     smoothedSpeed = 0
@@ -329,7 +343,7 @@ RS.Heartbeat:Connect(function(dt)
     local ev = hrp.AssemblyLinearVelocity
     vel = Vector3.new(vel.X, ev.Y, vel.Z)
 
-    -- WalkSpeed: 0 в воздухе — не даёт Roblox душить скорость
+    -- WalkSpeed: 0 в воздухе — не душит скорость
     if C.bhopIgnoreWalkSpeed then
         if onG then
             if hum.WalkSpeed ~= C.walkSpeed then hum.WalkSpeed = C.walkSpeed end
@@ -338,11 +352,12 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
+    -- EDGEBUG автоматически при падении + Ctrl зажат
     if not onG and not glideOn and st == Enum.HumanoidStateType.Freefall then
         tryEdgebug()
     end
 
-    -- glide (без surf attract!)
+    -- glide
     local wantGlide = keyDown(C.glideKey) and not onG
     if wantGlide ~= glideOn then
         glideOn = wantGlide
@@ -401,13 +416,23 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- ground + bhop с boost
+    -- GROUND + SMOOTH BHOP
     if onG then
+        -- counter-strafe
         if not m and C.counterStrafeEnabled then
             local h = Vector3.new(ev.X, 0, ev.Z)
             if h.Magnitude > 1 then
                 local nh = h * (1 - (1 - C.counterStrafePower) * math.min(dt*15, 1))
                 hrp.AssemblyLinearVelocity = Vector3.new(nh.X, ev.Y, nh.Z)
+            end
+        end
+
+        -- сохраняем скорость при касании земли (94%)
+        if keyDown(C.bhopKey) and bhopStreak > 0 then
+            local h = Vector3.new(ev.X, 0, ev.Z)
+            if h.Magnitude > 0.1 then
+                local kept = h * C.bhopGroundKeep
+                hrp.AssemblyLinearVelocity = Vector3.new(kept.X, ev.Y, kept.Z)
             end
         end
 
@@ -417,32 +442,24 @@ RS.Heartbeat:Connect(function(dt)
                 hum.Jump = true
                 bhopStreak = bhopStreak + 1
 
-                -- bhop boost: каждая успешная цепочка +% к горизонтали
-                local h = Vector3.new(ev.X, 0, ev.Z)
-                local baseSpeed = h.Magnitude
-
+                -- ПЛАВНЫЙ прирост скорости, +accel за прыжок
                 if bhopStreak > 1 then
-                    bhopSpeed = math.min(
-                        math.max(bhopSpeed * C.bhopBoost, baseSpeed * C.bhopBoost),
-                        C.bhopMaxSpeed
-                    )
+                    bhopSpeed = math.min(bhopSpeed + C.bhopAccel, C.bhopMaxSpeed)
                 else
-                    bhopSpeed = math.max(baseSpeed, C.walkSpeed)
+                    local h = Vector3.new(ev.X, 0, ev.Z)
+                    bhopSpeed = math.max(h.Magnitude, C.walkSpeed)
                 end
 
-                -- направление: куда бежишь (или куда летел)
+                -- направление = куда бежишь или куда летел
                 local dir = m
                 if not dir then
-                    if h.Magnitude > 0.1 then
-                        dir = h.Unit
-                    else
-                        dir = Vector3.zero
-                    end
+                    local h = Vector3.new(ev.X, 0, ev.Z)
+                    if h.Magnitude > 0.1 then dir = h.Unit end
                 end
 
-                if dir.Magnitude > 0.1 then
-                    local boosted = dir * bhopSpeed
-                    hrp.AssemblyLinearVelocity = Vector3.new(boosted.X, ev.Y, boosted.Z)
+                if dir and dir.Magnitude > 0.1 then
+                    local applied = dir * bhopSpeed
+                    hrp.AssemblyLinearVelocity = Vector3.new(applied.X, ev.Y, applied.Z)
                 end
             end
         else
@@ -650,7 +667,7 @@ local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v22  •  movement"
+subtitle.Text = "v23  •  smooth bhop"
 subtitle.TextColor3 = C.colAccent2
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -893,11 +910,12 @@ tabMisc.MouseButton1Click:Connect(function() selectTab("Settings") end)
 -- Movement
 makeLabel(pageMove, "MASTER")
 makeToggle(pageMove, "Movement enabled", "moveEnabled")
-makeLabel(pageMove, "BHOP")
+makeLabel(pageMove, "BHOP (smooth)")
 makeSlider(pageMove, "Walk speed", "walkSpeed", 8, 60, "")
 makeSlider(pageMove, "Bhop cooldown", "jumpCd", 0.01, 0.2, "s")
-makeSlider(pageMove, "Bhop boost", "bhopBoost", 1.0, 1.5, "x")
+makeSlider(pageMove, "Bhop accel per jump", "bhopAccel", 2, 20, "")
 makeSlider(pageMove, "Bhop max speed", "bhopMaxSpeed", 30, 150, "")
+makeSlider(pageMove, "Ground keep %", "bhopGroundKeep", 0.5, 0.99, "")
 makeLabel(pageMove, "COUNTER-STRAFE")
 makeToggle(pageMove, "Counter-strafe (fast stop)", "counterStrafeEnabled")
 makeSlider(pageMove, "Counter power", "counterStrafePower", 0.5, 0.99, "")
@@ -919,8 +937,18 @@ makeToggle(pageEdge, "Enable edgejump", "edgeJumpEnabled")
 makeSlider(pageEdge, "Jump power", "edgeJumpPower", 5, 60, "")
 makeSlider(pageEdge, "Jump limit", "edgeJumpLimit", 1, 5, "")
 makeLabel(pageEdge, "EDGEBUG")
-makeToggle(pageEdge, "Enable edgebug", "edgebugEnabled")
-makeSlider(pageEdge, "Look dist", "edgebugLookDist", 1, 8, "st")
+makeToggle(pageEdge, "Enable edgebug (hold Ctrl while falling)", "edgebugEnabled")
+makeLabel(pageEdge, "INFO")
+local ebInfo = Instance.new("TextLabel", pageEdge)
+ebInfo.Size = UDim2.new(1,0,0,60)
+ebInfo.BackgroundTransparency = 1
+ebInfo.Font = Enum.Font.Gotham
+ebInfo.Text = "Hold Ctrl while falling fast.\nIgnores fall damage — like CS:GO edgebug.\nWorks in most Roblox games."
+ebInfo.TextColor3 = Color3.fromRGB(100,140,100)
+ebInfo.TextSize = 11
+ebInfo.TextXAlignment = Enum.TextXAlignment.Left
+ebInfo.TextYAlignment = Enum.TextYAlignment.Top
+ebInfo.TextWrapped = true
 makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end)
 
 -- HUD
@@ -1183,4 +1211,4 @@ game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v22 loaded")
+print("[CUCUMBER] v23 loaded")
