@@ -1,5 +1,5 @@
 -- ============================================================
--- CUCUMBER Movement — v21 (clean)
+-- CUCUMBER Movement — v22 (bhop boost + clean glide)
 -- RightShift = menu | Z = unlock mouse | End = unload
 -- ============================================================
 
@@ -20,7 +20,7 @@ local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 local cam  = workspace.CurrentCamera
 
-local CONFIG_FILE = "cucumber_v21.json"
+local CONFIG_FILE = "cucumber_v22.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
 
 -- ============================================================
@@ -33,6 +33,8 @@ local C = {
     jumpCd = 0.04,
     walkSpeed = 24,
     bhopIgnoreWalkSpeed = true,
+    bhopBoost = 1.15,
+    bhopMaxSpeed = 60,
 
     autostrafeEnabled = true,
     autostrafeKey = Enum.KeyCode.LeftShift,
@@ -41,7 +43,6 @@ local C = {
 
     glideKey = Enum.KeyCode.V,
     glideControl = 10,
-    autoSurfEnabled = true,
 
     edgeJumpEnabled = true,
     edgeJumpKey = Enum.KeyCode.LeftControl,
@@ -130,7 +131,7 @@ sSub.Size = UDim2.new(1,0,0,20)
 sSub.Position = UDim2.new(0,0,0.5,20)
 sSub.BackgroundTransparency = 1
 sSub.Font = Enum.Font.GothamBold
-sSub.Text = "v21"
+sSub.Text = "v22"
 sSub.TextColor3 = Color3.fromRGB(90,180,80)
 sSub.TextSize = 13
 sSub.TextTransparency = 1
@@ -160,6 +161,7 @@ local bhopStreak = 0
 local maxSpeedSession = 0
 local doubleJumpUsed = false
 local smoothedSpeed = 0
+local bhopSpeed = 0   -- накопленная bhop-скорость
 
 local footSparks
 
@@ -198,15 +200,6 @@ local function raycastDir(dir, dist)
     p.FilterDescendantsInstances = {char}
     p.IgnoreWater = true
     return workspace:Raycast(hrp.Position, dir * dist, p)
-end
-
-local function findSurfPlane()
-    if not C.autoSurfEnabled then return nil end
-    local r = raycastDir(Vector3.new(0,-1,0), 3)
-    if not r then return nil end
-    local d = r.Normal:Dot(Vector3.yAxis)
-    if d >= 0.15 and d <= 0.96 then return r.Normal end
-    return nil
 end
 
 local function mv()
@@ -265,6 +258,7 @@ local function hookCharacter(c)
     alive = true
     glideOn = false
     doubleJumpUsed = false
+    bhopSpeed = 0
     C.edgeJumpUsed = 0
     spawnPos = hrp.Position
     smoothedSpeed = 0
@@ -335,6 +329,7 @@ RS.Heartbeat:Connect(function(dt)
     local ev = hrp.AssemblyLinearVelocity
     vel = Vector3.new(vel.X, ev.Y, vel.Z)
 
+    -- WalkSpeed: 0 в воздухе — не даёт Roblox душить скорость
     if C.bhopIgnoreWalkSpeed then
         if onG then
             if hum.WalkSpeed ~= C.walkSpeed then hum.WalkSpeed = C.walkSpeed end
@@ -347,7 +342,7 @@ RS.Heartbeat:Connect(function(dt)
         tryEdgebug()
     end
 
-    -- glide
+    -- glide (без surf attract!)
     local wantGlide = keyDown(C.glideKey) and not onG
     if wantGlide ~= glideOn then
         glideOn = wantGlide
@@ -367,15 +362,10 @@ RS.Heartbeat:Connect(function(dt)
     end
 
     if glideOn then
-        local surfN = findSurfPlane()
         if m then
             local turn = C.glideControl * dt
             local nd = glideDir + m * turn
             if nd.Magnitude > 0.001 then glideDir = nd.Unit end
-        end
-        if surfN then
-            local along = glideDir - surfN * glideDir:Dot(surfN)
-            if along.Magnitude > 0.01 then glideDir = along.Unit end
         end
         if glideSpeed > 120 then glideSpeed = 120 end
         local h = glideDir * glideSpeed
@@ -411,7 +401,7 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- ground
+    -- ground + bhop с boost
     if onG then
         if not m and C.counterStrafeEnabled then
             local h = Vector3.new(ev.X, 0, ev.Z)
@@ -426,9 +416,38 @@ RS.Heartbeat:Connect(function(dt)
                 lastJump = tick()
                 hum.Jump = true
                 bhopStreak = bhopStreak + 1
+
+                -- bhop boost: каждая успешная цепочка +% к горизонтали
+                local h = Vector3.new(ev.X, 0, ev.Z)
+                local baseSpeed = h.Magnitude
+
+                if bhopStreak > 1 then
+                    bhopSpeed = math.min(
+                        math.max(bhopSpeed * C.bhopBoost, baseSpeed * C.bhopBoost),
+                        C.bhopMaxSpeed
+                    )
+                else
+                    bhopSpeed = math.max(baseSpeed, C.walkSpeed)
+                end
+
+                -- направление: куда бежишь (или куда летел)
+                local dir = m
+                if not dir then
+                    if h.Magnitude > 0.1 then
+                        dir = h.Unit
+                    else
+                        dir = Vector3.zero
+                    end
+                end
+
+                if dir.Magnitude > 0.1 then
+                    local boosted = dir * bhopSpeed
+                    hrp.AssemblyLinearVelocity = Vector3.new(boosted.X, ev.Y, boosted.Z)
+                end
             end
         else
             bhopStreak = 0
+            bhopSpeed = 0
         end
     end
 
@@ -631,7 +650,7 @@ local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v21  •  movement"
+subtitle.Text = "v22  •  movement"
 subtitle.TextColor3 = C.colAccent2
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -877,6 +896,9 @@ makeToggle(pageMove, "Movement enabled", "moveEnabled")
 makeLabel(pageMove, "BHOP")
 makeSlider(pageMove, "Walk speed", "walkSpeed", 8, 60, "")
 makeSlider(pageMove, "Bhop cooldown", "jumpCd", 0.01, 0.2, "s")
+makeSlider(pageMove, "Bhop boost", "bhopBoost", 1.0, 1.5, "x")
+makeSlider(pageMove, "Bhop max speed", "bhopMaxSpeed", 30, 150, "")
+makeLabel(pageMove, "COUNTER-STRAFE")
 makeToggle(pageMove, "Counter-strafe (fast stop)", "counterStrafeEnabled")
 makeSlider(pageMove, "Counter power", "counterStrafePower", 0.5, 0.99, "")
 
@@ -887,7 +909,6 @@ makeSlider(pageAir, "Air accel", "autostrafeAccel", 20, 200, "")
 makeSlider(pageAir, "Air max speed", "autostrafeMaxSpeed", 40, 200, "")
 makeLabel(pageAir, "GLIDE")
 makeSlider(pageAir, "Glide control", "glideControl", 2, 25, "")
-makeToggle(pageAir, "Auto surf lock", "autoSurfEnabled")
 makeLabel(pageAir, "DOUBLE JUMP")
 makeToggle(pageAir, "Enable double jump", "doubleJumpEnabled")
 makeSlider(pageAir, "Double jump power", "doubleJumpPower", 10, 80, "")
@@ -1162,4 +1183,4 @@ game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v21 loaded")
+print("[CUCUMBER] v22 loaded")
