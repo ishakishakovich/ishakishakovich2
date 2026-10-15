@@ -1,5 +1,5 @@
 -- ============================================================
--- CUCUMBER Movement — v23 (smooth bhop + real edgebug)
+-- CUCUMBER Movement — v24 (smooth bhop, no jerk)
 -- RightShift = menu | Z = unlock mouse | End = unload
 -- ============================================================
 
@@ -20,7 +20,7 @@ local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 local cam  = workspace.CurrentCamera
 
-local CONFIG_FILE = "cucumber_v23.json"
+local CONFIG_FILE = "cucumber_v24.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
 
 -- ============================================================
@@ -30,12 +30,11 @@ local C = {
     moveEnabled = true,
 
     bhopKey = Enum.KeyCode.Space,
-    jumpCd = 0.04,
+    jumpCd = 0.05,
     walkSpeed = 24,
     bhopIgnoreWalkSpeed = true,
-    bhopMaxSpeed = 60,
-    bhopAccel = 8,
-    bhopGroundKeep = 0.94,
+    bhopMaxSpeed = 70,
+    bhopPerfectBonus = 1.5,   -- +studs/s за идеальный bhop (с чистым стрейфом)
 
     autostrafeEnabled = true,
     autostrafeKey = Enum.KeyCode.LeftShift,
@@ -131,7 +130,7 @@ sSub.Size = UDim2.new(1,0,0,20)
 sSub.Position = UDim2.new(0,0,0.5,20)
 sSub.BackgroundTransparency = 1
 sSub.Font = Enum.Font.GothamBold
-sSub.Text = "v23"
+sSub.Text = "v24  •  smooth"
 sSub.TextColor3 = Color3.fromRGB(90,180,80)
 sSub.TextSize = 13
 sSub.TextTransparency = 1
@@ -161,7 +160,12 @@ local bhopStreak = 0
 local maxSpeedSession = 0
 local doubleJumpUsed = false
 local smoothedSpeed = 0
-local bhopSpeed = 0
+
+-- bhop core
+local bhopCacheVel = nil      -- скорость в воздухе (сохраняется)
+local bhopChainVel = 0         -- текущая накопленная скорость цепочки
+local lastDir = nil            -- направление последнего прыжка
+local lastLandAt = 0           -- время последнего приземления
 
 local footSparks
 
@@ -220,34 +224,22 @@ local function edgeJump()
     hrp.AssemblyLinearVelocity = Vector3.new(cur.X, math.max(cur.Y, C.edgeJumpPower), cur.Z)
 end
 
--- EDGEBUG: на падении при зажатом Ctrl, в 1-4 studs над землёй
--- форсим state Running чтобы Landed не сработал → урон не проходит
 local function tryEdgebug()
     if not C.edgebugEnabled then return end
     if not keyDown(C.edgebugKey) then return end
-
     local vy = hrp.AssemblyLinearVelocity.Y
-    if vy > -15 then return end  -- недостаточно быстро падаем
-
+    if vy > -15 then return end
     local r = raycastDown(20)
     if not r then return end
-
     local dist = (hrp.Position - r.Position).Magnitude
     if dist > 4 or dist < 0.5 then return end
     if tick() - lastEdgebugAt < C.edgebugCooldown then return end
-
     lastEdgebugAt = tick()
-
-    -- обнуляем вертикаль (как в CS:GO)
     local v = hrp.AssemblyLinearVelocity
     hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
-
-    -- форсим Running — Landed не сработает, урон не посчитается
     pcall(function()
         hum:ChangeState(Enum.HumanoidStateType.Running)
     end)
-
-    -- маленький буст вверх на след кадр для надёжности
     task.delay(0.03, function()
         if alive and hrp then
             local c = hrp.AssemblyLinearVelocity
@@ -271,8 +263,10 @@ local function hookCharacter(c)
     alive = true
     glideOn = false
     doubleJumpUsed = false
-    bhopSpeed = 0
     bhopStreak = 0
+    bhopCacheVel = nil
+    bhopChainVel = 0
+    lastDir = nil
     C.edgeJumpUsed = 0
     spawnPos = hrp.Position
     smoothedSpeed = 0
@@ -323,7 +317,7 @@ UIS.InputBegan:Connect(function(input, gp)
 end)
 
 -- ============================================================
--- MAIN LOOP
+-- MAIN LOOP — smooth bhop
 -- ============================================================
 RS.Heartbeat:Connect(function(dt)
     if not _G.__CUCUMBER_LOADED then return end
@@ -334,16 +328,57 @@ RS.Heartbeat:Connect(function(dt)
     local onG = st == Enum.HumanoidStateType.Running or st == Enum.HumanoidStateType.Landed
     local m = mv()
 
+    -- edgejump counter reset
     if onG and not wasOnGround then
         C.edgeJumpUsed = 0
         doubleJumpUsed = false
     end
-    wasOnGround = onG
 
     local ev = hrp.AssemblyLinearVelocity
-    vel = Vector3.new(vel.X, ev.Y, vel.Z)
 
-    -- WalkSpeed: 0 в воздухе — не душит скорость
+    ---------------------------------------------------------
+    -- SMOOTH BHOP — restore velocity on landing, no jitter
+    ---------------------------------------------------------
+
+    -- кешируем скорость пока в воздухе (для восстановления при приземлении)
+    if not onG and st == Enum.HumanoidStateType.Freefall then
+        bhopCacheVel = Vector3.new(ev.X, 0, ev.Z)
+    end
+
+    -- JUST LANDED
+    if onG and not wasOnGround then
+        -- если был в цепочке bhop и Space зажат — восстанавливаем горизонталь
+        if bhopStreak > 0 and keyDown(C.bhopKey) and bhopCacheVel then
+            local restored = bhopCacheVel
+            -- легкий буст за счёт чистого приземления (не дёргает)
+            if C.bhopPerfectBonus > 0 then
+                local cur = Vector3.new(ev.X, 0, ev.Z)
+                if cur.Magnitude > 1 then
+                    -- совпадает ли текущее направление с тем, куда летел
+                    local sameDir = cur.Unit:Dot(restored.Unit)
+                    if sameDir > 0.7 then
+                        -- чистый landing — небольшой буст
+                        bhopChainVel = math.min(
+                            math.max(bhopChainVel, restored.Magnitude) + C.bhopPerfectBonus,
+                            C.bhopMaxSpeed
+                        )
+                    else
+                        bhopChainVel = restored.Magnitude
+                    end
+                else
+                    bhopChainVel = restored.Magnitude
+                end
+            else
+                bhopChainVel = restored.Magnitude
+            end
+            hrp.AssemblyLinearVelocity = Vector3.new(restored.X, ev.Y, restored.Z)
+        end
+    end
+    wasOnGround = onG
+
+    ---------------------------------------------------------
+
+    -- WalkSpeed: 0 в воздухе чтобы не срезало скорость
     if C.bhopIgnoreWalkSpeed then
         if onG then
             if hum.WalkSpeed ~= C.walkSpeed then hum.WalkSpeed = C.walkSpeed end
@@ -352,7 +387,7 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- EDGEBUG автоматически при падении + Ctrl зажат
+    -- edgebug
     if not onG and not glideOn and st == Enum.HumanoidStateType.Freefall then
         tryEdgebug()
     end
@@ -362,7 +397,7 @@ RS.Heartbeat:Connect(function(dt)
     if wantGlide ~= glideOn then
         glideOn = wantGlide
         if glideOn then
-            local h = Vector3.new(vel.X, 0, vel.Z)
+            local h = Vector3.new(ev.X, 0, ev.Z)
             glideSpeed = h.Magnitude
             if glideSpeed > 0.1 then
                 glideDir = h.Unit
@@ -372,7 +407,6 @@ RS.Heartbeat:Connect(function(dt)
                 glideSpeed = C.walkSpeed
             end
             hrp.AssemblyLinearVelocity = glideDir * glideSpeed
-            vel = Vector3.new(glideDir.X * glideSpeed, 0, glideDir.Z * glideSpeed)
         end
     end
 
@@ -385,7 +419,6 @@ RS.Heartbeat:Connect(function(dt)
         if glideSpeed > 120 then glideSpeed = 120 end
         local h = glideDir * glideSpeed
         hrp.AssemblyLinearVelocity = Vector3.new(h.X, 0, h.Z)
-        vel = Vector3.new(h.X, 0, h.Z)
 
         ensureFootSparks()
         if footSparks then footSparks.Rate = 60 end
@@ -405,21 +438,21 @@ RS.Heartbeat:Connect(function(dt)
         return
     end
 
-    -- autostrafe
+    -- autostrafe (плавно добавляет скорость в воздухе)
     if not onG and m and C.autostrafeEnabled and keyDown(C.autostrafeKey) then
-        local h = Vector3.new(vel.X, 0, vel.Z)
+        local h = Vector3.new(ev.X, 0, ev.Z)
         local curSpeed = h.Magnitude
         if curSpeed < C.autostrafeMaxSpeed then
             local add = math.min(C.autostrafeMaxSpeed - curSpeed, C.autostrafeAccel * dt)
-            h = h + m * add
-            vel = Vector3.new(h.X, ev.Y, h.Z)
+            local newH = h + m * add
+            hrp.AssemblyLinearVelocity = Vector3.new(newH.X, ev.Y, newH.Z)
         end
     end
 
-    -- GROUND + SMOOTH BHOP
+    -- GROUND
     if onG then
         -- counter-strafe
-        if not m and C.counterStrafeEnabled then
+        if not m and C.counterStrafeEnabled and bhopStreak == 0 then
             local h = Vector3.new(ev.X, 0, ev.Z)
             if h.Magnitude > 1 then
                 local nh = h * (1 - (1 - C.counterStrafePower) * math.min(dt*15, 1))
@@ -427,44 +460,29 @@ RS.Heartbeat:Connect(function(dt)
             end
         end
 
-        -- сохраняем скорость при касании земли (94%)
-        if keyDown(C.bhopKey) and bhopStreak > 0 then
-            local h = Vector3.new(ev.X, 0, ev.Z)
-            if h.Magnitude > 0.1 then
-                local kept = h * C.bhopGroundKeep
-                hrp.AssemblyLinearVelocity = Vector3.new(kept.X, ev.Y, kept.Z)
-            end
-        end
-
+        -- smooth bhop: просто прыжок, без velocity записи
         if keyDown(C.bhopKey) then
             if tick() - lastJump > C.jumpCd then
                 lastJump = tick()
                 hum.Jump = true
                 bhopStreak = bhopStreak + 1
 
-                -- ПЛАВНЫЙ прирост скорости, +accel за прыжок
-                if bhopStreak > 1 then
-                    bhopSpeed = math.min(bhopSpeed + C.bhopAccel, C.bhopMaxSpeed)
-                else
+                -- при первом прыжке — фиксируем начальную скорость
+                if bhopStreak == 1 then
                     local h = Vector3.new(ev.X, 0, ev.Z)
-                    bhopSpeed = math.max(h.Magnitude, C.walkSpeed)
+                    bhopChainVel = math.max(h.Magnitude, C.walkSpeed)
                 end
 
-                -- направление = куда бежишь или куда летел
-                local dir = m
-                if not dir then
-                    local h = Vector3.new(ev.X, 0, ev.Z)
-                    if h.Magnitude > 0.1 then dir = h.Unit end
-                end
-
-                if dir and dir.Magnitude > 0.1 then
-                    local applied = dir * bhopSpeed
-                    hrp.AssemblyLinearVelocity = Vector3.new(applied.X, ev.Y, applied.Z)
+                -- сохраняем направление для cache-восстановления
+                if m then
+                    lastDir = m
                 end
             end
         else
             bhopStreak = 0
-            bhopSpeed = 0
+            bhopChainVel = 0
+            bhopCacheVel = nil
+            lastDir = nil
         end
     end
 
@@ -667,7 +685,7 @@ local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v23  •  smooth bhop"
+subtitle.Text = "v24  •  smooth bhop"
 subtitle.TextColor3 = C.colAccent2
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -910,12 +928,11 @@ tabMisc.MouseButton1Click:Connect(function() selectTab("Settings") end)
 -- Movement
 makeLabel(pageMove, "MASTER")
 makeToggle(pageMove, "Movement enabled", "moveEnabled")
-makeLabel(pageMove, "BHOP (smooth)")
+makeLabel(pageMove, "BHOP (smooth — CS:GO style)")
 makeSlider(pageMove, "Walk speed", "walkSpeed", 8, 60, "")
-makeSlider(pageMove, "Bhop cooldown", "jumpCd", 0.01, 0.2, "s")
-makeSlider(pageMove, "Bhop accel per jump", "bhopAccel", 2, 20, "")
+makeSlider(pageMove, "Bhop cooldown", "jumpCd", 0.01, 0.15, "s")
+makeSlider(pageMove, "Perfect bhop bonus", "bhopPerfectBonus", 0, 5, "")
 makeSlider(pageMove, "Bhop max speed", "bhopMaxSpeed", 30, 150, "")
-makeSlider(pageMove, "Ground keep %", "bhopGroundKeep", 0.5, 0.99, "")
 makeLabel(pageMove, "COUNTER-STRAFE")
 makeToggle(pageMove, "Counter-strafe (fast stop)", "counterStrafeEnabled")
 makeSlider(pageMove, "Counter power", "counterStrafePower", 0.5, 0.99, "")
@@ -937,18 +954,7 @@ makeToggle(pageEdge, "Enable edgejump", "edgeJumpEnabled")
 makeSlider(pageEdge, "Jump power", "edgeJumpPower", 5, 60, "")
 makeSlider(pageEdge, "Jump limit", "edgeJumpLimit", 1, 5, "")
 makeLabel(pageEdge, "EDGEBUG")
-makeToggle(pageEdge, "Enable edgebug (hold Ctrl while falling)", "edgebugEnabled")
-makeLabel(pageEdge, "INFO")
-local ebInfo = Instance.new("TextLabel", pageEdge)
-ebInfo.Size = UDim2.new(1,0,0,60)
-ebInfo.BackgroundTransparency = 1
-ebInfo.Font = Enum.Font.Gotham
-ebInfo.Text = "Hold Ctrl while falling fast.\nIgnores fall damage — like CS:GO edgebug.\nWorks in most Roblox games."
-ebInfo.TextColor3 = Color3.fromRGB(100,140,100)
-ebInfo.TextSize = 11
-ebInfo.TextXAlignment = Enum.TextXAlignment.Left
-ebInfo.TextYAlignment = Enum.TextYAlignment.Top
-ebInfo.TextWrapped = true
+makeToggle(pageEdge, "Enable edgebug (hold Ctrl falling)", "edgebugEnabled")
 makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end)
 
 -- HUD
@@ -1211,4 +1217,4 @@ game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v23 loaded")
+print("[CUCUMBER] v24 loaded")
