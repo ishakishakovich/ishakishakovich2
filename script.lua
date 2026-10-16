@@ -1,7 +1,7 @@
 -- ============================================================
--- CUCUMBER Movement — v26 (PS/EB/TB indicators + texture bug)
+-- CUCUMBER Movement — v27 (TB = head pixel surf)
 -- RightShift = menu | Z = unlock mouse | End = unload
--- H = texture bug (head slam) | V = pixel surf | Ctrl = edgejump
+-- V = pixel surf (feet) | H (hold) = texture bug (head)
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -19,10 +19,10 @@ local plr  = Players.LocalPlayer
 local char = plr.Character or plr.CharacterAdded:Wait()
 local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
+local head = char:WaitForChild("Head")
 local cam  = workspace.CurrentCamera
-local head = char:FindFirstChild("Head")
 
-local CONFIG_FILE = "cucumber_v26.json"
+local CONFIG_FILE = "cucumber_v27.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
 
 -- ============================================================
@@ -46,6 +46,15 @@ local C = {
     glideKey = Enum.KeyCode.V,
     glideControl = 10,
 
+    -- TEXTURE BUG = head surf
+    textureBugEnabled = true,
+    textureBugKey = Enum.KeyCode.H,
+    textureBugMaxSpeed = 100,
+    textureBugControl = 12,
+    textureBugStick = 3,
+    textureBugRange = 4,
+    textureBugCamTilt = true,
+
     edgeJumpEnabled = true,
     edgeJumpKey = Enum.KeyCode.LeftControl,
     edgeJumpLimit = 2,
@@ -55,12 +64,6 @@ local C = {
     edgebugEnabled = true,
     edgebugMinFallSpeed = 20,
     edgebugCooldown = 0.4,
-
-    -- TEXTURE BUG
-    textureBugEnabled = true,
-    textureBugKey = Enum.KeyCode.H,
-    textureBugPower = 35,
-    textureBugUpBoost = 3,
 
     counterStrafeEnabled = true,
     counterStrafePower = 0.88,
@@ -140,7 +143,7 @@ sSub.Size = UDim2.new(1,0,0,20)
 sSub.Position = UDim2.new(0,0,0.5,20)
 sSub.BackgroundTransparency = 1
 sSub.Font = Enum.Font.GothamBold
-sSub.Text = "v26"
+sSub.Text = "v27"
 sSub.TextColor3 = Color3.fromRGB(90,180,80)
 sSub.TextSize = 13
 sSub.TextTransparency = 1
@@ -174,13 +177,17 @@ local smoothedSpeed = 0
 local bhopCacheVel = nil
 local bhopChainVel = 0
 
+-- TB state
+local tbOn = false
+local tbSpeed = 0
+local tbDir = Vector3.zero
+local tbHitSurface = false
+
 local lastGlideTick = 0
 local lastEdgebugTick = 0
 local lastTbTick = 0
-local tbWindowEnd = 0
 
 local footSparks
-local headConnection = nil
 
 -- ============================================================
 -- FOOT SPARKS
@@ -217,6 +224,41 @@ local function raycastDown(maxDist)
     p.FilterDescendantsInstances = {char}
     p.IgnoreWater = true
     return workspace:Raycast(hrp.Position, Vector3.new(0, -(maxDist or 20), 0), p)
+end
+
+-- ищем поверхность вокруг головы (вперёд, в бок, вниз)
+local function findHeadSurface()
+    if not head or not hrp then return nil end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {char}
+    params.IgnoreWater = true
+
+    -- направление вперёд (куда летим)
+    local fwd = tbDir
+    if fwd.Magnitude < 0.01 then
+        local look = hrp.CFrame.LookVector
+        fwd = Vector3.new(look.X, 0, look.Z).Unit
+    end
+
+    local right = Vector3.new(-fwd.Z, 0, fwd.X)  -- перпендикуляр
+
+    local dirs = {
+        fwd,
+        (fwd + Vector3.new(0, -0.4, 0)).Unit,
+        (fwd + Vector3.new(0, -0.8, 0)).Unit,
+        (fwd + right * 0.7).Unit,
+        (fwd - right * 0.7).Unit,
+    }
+
+    for _, d in ipairs(dirs) do
+        local r = workspace:Raycast(head.Position, d * C.textureBugRange, params)
+        if r then
+            return r.Normal, r.Position
+        end
+    end
+    return nil
 end
 
 local function mv()
@@ -262,42 +304,6 @@ local function tryEdgebug()
     return true
 end
 
--- TEXTURE BUG — бросок головой вперёд
-local function doTextureBug()
-    if not C.textureBugEnabled then return end
-    if not hrp or not head then return end
-
-    local look = hrp.CFrame.LookVector
-    local horiz = Vector3.new(look.X, 0, look.Z)
-    if horiz.Magnitude < 0.01 then horiz = Vector3.new(0, 0, -1) end
-    horiz = horiz.Unit
-
-    -- бросок вперёд + вверх чуть-чуть
-    local boost = horiz * C.textureBugPower
-    hrp.AssemblyLinearVelocity = Vector3.new(
-        boost.X,
-        math.max(hrp.AssemblyLinearVelocity.Y, C.textureBugUpBoost),
-        boost.Z
-    )
-
-    -- окно отслеживания 0.6 сек
-    tbWindowEnd = tick() + 0.6
-end
-
--- подключаем Head.Touched
-local function hookHeadTouched()
-    if headConnection then headConnection:Disconnect(); headConnection = nil end
-    head = char and char:FindFirstChild("Head")
-    if not head then return end
-
-    headConnection = head.Touched:Connect(function(part)
-        if not part then return end
-        if part:IsDescendantOf(char) then return end
-        if tick() > tbWindowEnd then return end  -- вне окна — игнор
-        lastTbTick = tick()
-    end)
-end
-
 -- ============================================================
 -- CHARACTER HOOK
 -- ============================================================
@@ -313,6 +319,7 @@ local function hookCharacter(c)
     vel = Vector3.zero
     alive = true
     glideOn = false
+    tbOn = false
     doubleJumpUsed = false
     bhopStreak = 0
     bhopCacheVel = nil
@@ -323,14 +330,11 @@ local function hookCharacter(c)
     hum.WalkSpeed = C.walkSpeed
 
     if hum.Died then hum.Died:Connect(function() alive = false end) end
-
-    hookHeadTouched()
 end
 
 plr.CharacterAdded:Connect(hookCharacter)
 if hum.Died then hum.Died:Connect(function() alive = false end) end
 hum.WalkSpeed = C.walkSpeed
-hookHeadTouched()
 
 -- ============================================================
 -- ANTI-AFK
@@ -352,13 +356,6 @@ end)
 -- ============================================================
 -- INPUT
 -- ============================================================
-UIS.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == C.textureBugKey then
-        doTextureBug()
-    end
-end)
-
 UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode ~= Enum.KeyCode.Space then return end
@@ -433,11 +430,96 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    if not onG and not glideOn and st == Enum.HumanoidStateType.Freefall then
+    if not onG and not glideOn and not tbOn and st == Enum.HumanoidStateType.Freefall then
         tryEdgebug()
     end
 
-    -- glide
+    -----------------------------------------------------------
+    -- TEXTURE BUG (head surf) — H held in air
+    -----------------------------------------------------------
+    local wantTB = C.textureBugEnabled and keyDown(C.textureBugKey) and not onG
+
+    if wantTB and not tbOn then
+        -- вход в TB
+        tbOn = true
+        local h = Vector3.new(ev.X, 0, ev.Z)
+        tbSpeed = math.max(h.Magnitude, C.walkSpeed)
+        if h.Magnitude > 0.5 then
+            tbDir = h.Unit
+        else
+            local look = hrp.CFrame.LookVector
+            tbDir = Vector3.new(look.X, 0, look.Z).Unit
+        end
+        tbHitSurface = false
+
+        -- tilt camera forward
+        if C.textureBugCamTilt and cam then
+            Tween:Create(cam, TweenInfo.new(0.15), {
+                CFrame = cam.CFrame * CFrame.Angles(math.rad(8), 0, 0)
+            }):Play()
+        end
+    elseif not wantTB and tbOn then
+        tbOn = false
+        -- return camera
+        if C.textureBugCamTilt and cam then
+            Tween:Create(cam, TweenInfo.new(0.2), {
+                CFrame = cam.CFrame * CFrame.Angles(math.rad(-8), 0, 0)
+            }):Play()
+        end
+    end
+
+    if tbOn then
+        lastTbTick = tick()
+
+        -- руление
+        if m then
+            local turn = C.textureBugControl * dt
+            local nd = tbDir + m * turn
+            if nd.Magnitude > 0.001 then tbDir = nd.Unit end
+        end
+
+        -- ищем поверхность вокруг головы
+        local normal, hitPos = findHeadSurface()
+
+        if normal then
+            tbHitSurface = true
+            -- проецируем движение вдоль поверхности
+            local along = tbDir - normal * tbDir:Dot(normal)
+            if along.Magnitude > 0.01 then
+                tbDir = along.Unit
+            end
+            -- прижимаемся к поверхности (не отлипаем)
+            -- сдвигаем hrp чуть к нормали
+            hrp.CFrame = hrp.CFrame + normal * C.textureBugStick * dt
+        end
+
+        -- ограничение скорости
+        if tbSpeed > C.textureBugMaxSpeed then
+            tbSpeed = C.textureBugMaxSpeed
+        end
+
+        -- применяем velocity (горизонталь, Y = 0 — не падаем)
+        local h = tbDir * tbSpeed
+        hrp.AssemblyLinearVelocity = Vector3.new(h.X, 0, h.Z)
+
+        -- safety
+        local pos = hrp.Position
+        if pos.Y < C.fallY or pos.Magnitude > C.resetDist then
+            hrp.CFrame = CFrame.new(spawnPos); vel = Vector3.zero
+            tbOn = false; return
+        end
+        local b = C.bounds - C.margin
+        local cx = math.clamp(pos.X, -b, b)
+        local cz = math.clamp(pos.Z, -b, b)
+        if cx ~= pos.X or cz ~= pos.Z then
+            hrp.CFrame = CFrame.new(cx, pos.Y, cz) * (hrp.CFrame - hrp.CFrame.Position)
+        end
+        return
+    end
+
+    -----------------------------------------------------------
+    -- PIXEL GLIDE (V) — feet surf
+    -----------------------------------------------------------
     local wantGlide = keyDown(C.glideKey) and not onG
     if wantGlide ~= glideOn then
         glideOn = wantGlide
@@ -607,7 +689,6 @@ streakLbl.Text = ""; streakLbl.TextColor3 = C.colAccent
 streakLbl.TextSize = 22
 streakLbl.Visible = C.showStreak
 
--- INDICATORS
 local indicatorFrame = Instance.new("Frame", hud)
 indicatorFrame.Size = UDim2.new(0, 160, 0, 34)
 indicatorFrame.Position = UDim2.new(0.5, -80, 1, -115)
@@ -629,9 +710,8 @@ indLbl.TextColor3 = C.colAccent2
 indLbl.TextSize = 16
 indLbl.TextTransparency = 0.6
 
--- keybinds
 local keysFrame = Instance.new("Frame", hud)
-keysFrame.Size = UDim2.new(0,380,0,40); keysFrame.Position = UDim2.new(0.5,-190,1,-70)
+keysFrame.Size = UDim2.new(0,420,0,40); keysFrame.Position = UDim2.new(0.5,-210,1,-70)
 keysFrame.BackgroundTransparency = 1
 keysFrame.Visible = C.showMidKeys
 local keysLayout = Instance.new("UIListLayout", keysFrame)
@@ -742,7 +822,7 @@ local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v26"
+subtitle.Text = "v27"
 subtitle.TextColor3 = C.colAccent2
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -999,13 +1079,13 @@ makeLabel(pageAir, "AIR STRAFE")
 makeToggle(pageAir, "Autostrafe (Shift)", "autostrafeEnabled")
 makeSlider(pageAir, "Air accel", "autostrafeAccel", 20, 200, "")
 makeSlider(pageAir, "Air max speed", "autostrafeMaxSpeed", 40, 200, "")
-makeLabel(pageAir, "GLIDE (PS)")
+makeLabel(pageAir, "GLIDE (PS — feet)")
 makeSlider(pageAir, "Glide control", "glideControl", 2, 25, "")
 makeLabel(pageAir, "DOUBLE JUMP")
 makeToggle(pageAir, "Enable double jump", "doubleJumpEnabled")
 makeSlider(pageAir, "Double jump power", "doubleJumpPower", 10, 80, "")
 
--- Edge + TB
+-- Edge
 makeLabel(pageEdge, "EDGEJUMP")
 makeToggle(pageEdge, "Enable edgejump (Ctrl+Space air)", "edgeJumpEnabled")
 makeSlider(pageEdge, "Jump power", "edgeJumpPower", 5, 60, "")
@@ -1013,20 +1093,26 @@ makeSlider(pageEdge, "Jump limit", "edgeJumpLimit", 1, 5, "")
 makeLabel(pageEdge, "EDGEBUG (EB) — auto")
 makeToggle(pageEdge, "Enable edgebug (auto on fall)", "edgebugEnabled")
 makeSlider(pageEdge, "Min fall speed", "edgebugMinFallSpeed", 10, 50, "")
-makeLabel(pageEdge, "TEXTURE BUG (TB)")
-makeToggle(pageEdge, "Enable texture bug (H)", "textureBugEnabled")
-makeSlider(pageEdge, "Head slam power", "textureBugPower", 10, 80, "")
-makeSlider(pageEdge, "Up boost", "textureBugUpBoost", 0, 15, "")
+
+makeLabel(pageEdge, "TEXTURE BUG (TB — head surf)")
+makeToggle(pageEdge, "Enable texture bug", "textureBugEnabled")
+makeSlider(pageEdge, "Max speed", "textureBugMaxSpeed", 40, 200, "")
+makeSlider(pageEdge, "Control", "textureBugControl", 2, 25, "")
+makeSlider(pageEdge, "Stick force", "textureBugStick", 0, 15, "")
+makeSlider(pageEdge, "Head scan range", "textureBugRange", 2, 8, "st")
+makeToggle(pageEdge, "Camera tilt", "textureBugCamTilt")
+
 local tbInfo = Instance.new("TextLabel", pageEdge)
-tbInfo.Size = UDim2.new(1,0,0,40)
+tbInfo.Size = UDim2.new(1,0,0,50)
 tbInfo.BackgroundTransparency = 1
 tbInfo.Font = Enum.Font.Gotham
-tbInfo.Text = "Press H → character dives forward head-first.\nIf head hits any surface → TB indicator."
+tbInfo.Text = "Hold H in air → head-based pixel surf.\nSlides along any surface with head.\nJust like V but with head."
 tbInfo.TextColor3 = Color3.fromRGB(100,140,100)
 tbInfo.TextSize = 11
 tbInfo.TextXAlignment = Enum.TextXAlignment.Left
 tbInfo.TextYAlignment = Enum.TextYAlignment.Top
 tbInfo.TextWrapped = true
+
 makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end)
 
 -- HUD
@@ -1086,10 +1172,10 @@ local function makeKeybindRow(parent, label, keyName)
 end
 
 makeKeybindRow(pageKeys, "Bhop", "bhopKey")
-makeKeybindRow(pageKeys, "Glide (PS)", "glideKey")
+makeKeybindRow(pageKeys, "Pixel surf (V)", "glideKey")
 makeKeybindRow(pageKeys, "Edgejump", "edgeJumpKey")
 makeKeybindRow(pageKeys, "Autostrafe", "autostrafeKey")
-makeKeybindRow(pageKeys, "Texture bug (TB)", "textureBugKey")
+makeKeybindRow(pageKeys, "Texture bug (H)", "textureBugKey")
 makeKeybindRow(pageKeys, "Menu", "menuKey")
 makeKeybindRow(pageKeys, "Mouse unlock", "mouseKey")
 
@@ -1211,7 +1297,6 @@ end)
 _G.__CUCUMBER_UNLOAD = function()
     _G.__CUCUMBER_LOADED = false
     pcall(function() saveConfig() end)
-    pcall(function() if headConnection then headConnection:Disconnect() end end)
     pcall(function() if footSparks then footSparks:Destroy() end end)
     pcall(function() if hud then hud:Destroy() end end)
     pcall(function() if gui then gui:Destroy() end end)
@@ -1278,17 +1363,23 @@ RS.RenderStepped:Connect(function(dt)
         streakLbl.Text = ""
     end
 
-    -- === INDICATORS ===
+    -- INDICATORS
     if C.showIndicators then
         local tn = tick()
         local psActive = (tn - lastGlideTick) < 0.15
         local ebActive = (tn - lastEdgebugTick) < 1.0
-        local tbActive = (tn - lastTbTick) < 1.0
+        local tbActive = tbOn
 
         local parts = {}
         if psActive then table.insert(parts, "PS") end
         if ebActive then table.insert(parts, "EB") end
-        if tbActive then table.insert(parts, "TB") end
+        if tbActive then
+            if tbHitSurface then
+                table.insert(parts, "TB*")
+            else
+                table.insert(parts, "TB")
+            end
+        end
 
         if #parts == 0 then
             indLbl.Text = "—"
@@ -1297,8 +1388,8 @@ RS.RenderStepped:Connect(function(dt)
         elseif #parts == 1 then
             indLbl.Text = parts[1]
             local c = C.colAccent
-            if parts[1] == "EB" then c = Color3.fromRGB(255, 140, 90) end
-            if parts[1] == "TB" then c = Color3.fromRGB(180, 140, 255) end
+            if parts[1]:sub(1,2) == "EB" then c = Color3.fromRGB(255, 140, 90) end
+            if parts[1]:sub(1,2) == "TB" then c = Color3.fromRGB(180, 140, 255) end
             indLbl.TextColor3 = c
             indStroke.Color = c
         else
@@ -1323,4 +1414,4 @@ game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v26 loaded")
+print("[CUCUMBER] v27 loaded")
