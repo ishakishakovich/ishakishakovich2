@@ -1,5 +1,5 @@
 -- ============================================================
--- CUCUMBER Movement — v24 (smooth bhop, no jerk)
+-- CUCUMBER Movement — v25 (PS/EB indicators + auto edgebug)
 -- RightShift = menu | Z = unlock mouse | End = unload
 -- ============================================================
 
@@ -20,7 +20,7 @@ local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 local cam  = workspace.CurrentCamera
 
-local CONFIG_FILE = "cucumber_v24.json"
+local CONFIG_FILE = "cucumber_v25.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
 
 -- ============================================================
@@ -34,7 +34,7 @@ local C = {
     walkSpeed = 24,
     bhopIgnoreWalkSpeed = true,
     bhopMaxSpeed = 70,
-    bhopPerfectBonus = 1.5,   -- +studs/s за идеальный bhop (с чистым стрейфом)
+    bhopPerfectBonus = 1.5,
 
     autostrafeEnabled = true,
     autostrafeKey = Enum.KeyCode.LeftShift,
@@ -49,9 +49,11 @@ local C = {
     edgeJumpLimit = 2,
     edgeJumpPower = 20,
     edgeJumpUsed = 0,
+
+    -- edgebug ТЕПЕРЬ АВТОМАТИЧЕСКИЙ
     edgebugEnabled = true,
-    edgebugKey = Enum.KeyCode.LeftControl,
-    edgebugCooldown = 0.1,
+    edgebugMinFallSpeed = 20,   -- минимальная скорость падения чтобы сработал
+    edgebugCooldown = 0.4,
 
     counterStrafeEnabled = true,
     counterStrafePower = 0.88,
@@ -64,6 +66,7 @@ local C = {
     showStreak = true,
     showMidKeys = true,
     showFPS = true,
+    showIndicators = true,   -- показывает PS/EB
 
     antiAfkEnabled = true,
 
@@ -130,7 +133,7 @@ sSub.Size = UDim2.new(1,0,0,20)
 sSub.Position = UDim2.new(0,0,0.5,20)
 sSub.BackgroundTransparency = 1
 sSub.Font = Enum.Font.GothamBold
-sSub.Text = "v24  •  smooth"
+sSub.Text = "v25"
 sSub.TextColor3 = Color3.fromRGB(90,180,80)
 sSub.TextSize = 13
 sSub.TextTransparency = 1
@@ -161,11 +164,13 @@ local maxSpeedSession = 0
 local doubleJumpUsed = false
 local smoothedSpeed = 0
 
--- bhop core
-local bhopCacheVel = nil      -- скорость в воздухе (сохраняется)
-local bhopChainVel = 0         -- текущая накопленная скорость цепочки
-local lastDir = nil            -- направление последнего прыжка
-local lastLandAt = 0           -- время последнего приземления
+-- bhop smooth
+local bhopCacheVel = nil
+local bhopChainVel = 0
+
+-- indicators
+local lastGlideTick = 0
+local lastEdgebugTick = 0
 
 local footSparks
 
@@ -224,28 +229,42 @@ local function edgeJump()
     hrp.AssemblyLinearVelocity = Vector3.new(cur.X, math.max(cur.Y, C.edgeJumpPower), cur.Z)
 end
 
+-- AUTO EDGEBUG — срабатывает сам при быстром падении
 local function tryEdgebug()
-    if not C.edgebugEnabled then return end
-    if not keyDown(C.edgebugKey) then return end
+    if not C.edgebugEnabled then return false end
+
     local vy = hrp.AssemblyLinearVelocity.Y
-    if vy > -15 then return end
-    local r = raycastDown(20)
-    if not r then return end
+    -- падаем ли быстро?
+    if vy > -C.edgebugMinFallSpeed then return false end
+
+    -- есть ли земля в 1-4 studs?
+    local r = raycastDown(5)
+    if not r then return false end
+
     local dist = (hrp.Position - r.Position).Magnitude
-    if dist > 4 or dist < 0.5 then return end
-    if tick() - lastEdgebugAt < C.edgebugCooldown then return end
+    if dist > 4 or dist < 0.5 then return false end
+    if tick() - lastEdgebugAt < C.edgebugCooldown then return false end
+
     lastEdgebugAt = tick()
+    lastEdgebugTick = tick()
+
+    -- обнуляем вертикаль
     local v = hrp.AssemblyLinearVelocity
     hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+
+    -- форсим Running → Landed не сработает → урона нет
     pcall(function()
         hum:ChangeState(Enum.HumanoidStateType.Running)
     end)
+
     task.delay(0.03, function()
         if alive and hrp then
             local c = hrp.AssemblyLinearVelocity
             hrp.AssemblyLinearVelocity = Vector3.new(c.X, 2, c.Z)
         end
     end)
+
+    return true
 end
 
 -- ============================================================
@@ -266,7 +285,6 @@ local function hookCharacter(c)
     bhopStreak = 0
     bhopCacheVel = nil
     bhopChainVel = 0
-    lastDir = nil
     C.edgeJumpUsed = 0
     spawnPos = hrp.Position
     smoothedSpeed = 0
@@ -317,7 +335,7 @@ UIS.InputBegan:Connect(function(input, gp)
 end)
 
 -- ============================================================
--- MAIN LOOP — smooth bhop
+-- MAIN LOOP
 -- ============================================================
 RS.Heartbeat:Connect(function(dt)
     if not _G.__CUCUMBER_LOADED then return end
@@ -328,7 +346,6 @@ RS.Heartbeat:Connect(function(dt)
     local onG = st == Enum.HumanoidStateType.Running or st == Enum.HumanoidStateType.Landed
     local m = mv()
 
-    -- edgejump counter reset
     if onG and not wasOnGround then
         C.edgeJumpUsed = 0
         doubleJumpUsed = false
@@ -336,28 +353,20 @@ RS.Heartbeat:Connect(function(dt)
 
     local ev = hrp.AssemblyLinearVelocity
 
-    ---------------------------------------------------------
-    -- SMOOTH BHOP — restore velocity on landing, no jitter
-    ---------------------------------------------------------
-
-    -- кешируем скорость пока в воздухе (для восстановления при приземлении)
+    -- кеш скорости в воздухе
     if not onG and st == Enum.HumanoidStateType.Freefall then
         bhopCacheVel = Vector3.new(ev.X, 0, ev.Z)
     end
 
     -- JUST LANDED
     if onG and not wasOnGround then
-        -- если был в цепочке bhop и Space зажат — восстанавливаем горизонталь
         if bhopStreak > 0 and keyDown(C.bhopKey) and bhopCacheVel then
             local restored = bhopCacheVel
-            -- легкий буст за счёт чистого приземления (не дёргает)
             if C.bhopPerfectBonus > 0 then
                 local cur = Vector3.new(ev.X, 0, ev.Z)
                 if cur.Magnitude > 1 then
-                    -- совпадает ли текущее направление с тем, куда летел
                     local sameDir = cur.Unit:Dot(restored.Unit)
                     if sameDir > 0.7 then
-                        -- чистый landing — небольшой буст
                         bhopChainVel = math.min(
                             math.max(bhopChainVel, restored.Magnitude) + C.bhopPerfectBonus,
                             C.bhopMaxSpeed
@@ -376,9 +385,7 @@ RS.Heartbeat:Connect(function(dt)
     end
     wasOnGround = onG
 
-    ---------------------------------------------------------
-
-    -- WalkSpeed: 0 в воздухе чтобы не срезало скорость
+    -- WalkSpeed
     if C.bhopIgnoreWalkSpeed then
         if onG then
             if hum.WalkSpeed ~= C.walkSpeed then hum.WalkSpeed = C.walkSpeed end
@@ -387,7 +394,7 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- edgebug
+    -- AUTO EDGEBUG (без Ctrl!)
     if not onG and not glideOn and st == Enum.HumanoidStateType.Freefall then
         tryEdgebug()
     end
@@ -411,6 +418,8 @@ RS.Heartbeat:Connect(function(dt)
     end
 
     if glideOn then
+        lastGlideTick = tick()  -- индикатор PS
+
         if m then
             local turn = C.glideControl * dt
             local nd = glideDir + m * turn
@@ -438,9 +447,9 @@ RS.Heartbeat:Connect(function(dt)
         return
     end
 
-    -- autostrafe (плавно добавляет скорость в воздухе)
+    -- autostrafe
     if not onG and m and C.autostrafeEnabled and keyDown(C.autostrafeKey) then
-        local h = Vector3.new(ev.X, 0, ev.Z)
+        local h = Vector3.new(ev.X, 0, vel.Z)
         local curSpeed = h.Magnitude
         if curSpeed < C.autostrafeMaxSpeed then
             local add = math.min(C.autostrafeMaxSpeed - curSpeed, C.autostrafeAccel * dt)
@@ -451,7 +460,6 @@ RS.Heartbeat:Connect(function(dt)
 
     -- GROUND
     if onG then
-        -- counter-strafe
         if not m and C.counterStrafeEnabled and bhopStreak == 0 then
             local h = Vector3.new(ev.X, 0, ev.Z)
             if h.Magnitude > 1 then
@@ -460,33 +468,23 @@ RS.Heartbeat:Connect(function(dt)
             end
         end
 
-        -- smooth bhop: просто прыжок, без velocity записи
         if keyDown(C.bhopKey) then
             if tick() - lastJump > C.jumpCd then
                 lastJump = tick()
                 hum.Jump = true
                 bhopStreak = bhopStreak + 1
-
-                -- при первом прыжке — фиксируем начальную скорость
                 if bhopStreak == 1 then
                     local h = Vector3.new(ev.X, 0, ev.Z)
                     bhopChainVel = math.max(h.Magnitude, C.walkSpeed)
-                end
-
-                -- сохраняем направление для cache-восстановления
-                if m then
-                    lastDir = m
                 end
             end
         else
             bhopStreak = 0
             bhopChainVel = 0
             bhopCacheVel = nil
-            lastDir = nil
         end
     end
 
-    -- foot sparks
     ensureFootSparks()
     if footSparks then
         if onG then
@@ -497,7 +495,6 @@ RS.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- safety
     local pos = hrp.Position
     if pos.Y < C.fallY or pos.Magnitude > C.resetDist then
         hrp.CFrame = CFrame.new(spawnPos); vel = Vector3.zero
@@ -574,6 +571,29 @@ streakLbl.Text = ""; streakLbl.TextColor3 = C.colAccent
 streakLbl.TextSize = 22
 streakLbl.Visible = C.showStreak
 
+-- === INDICATOR PS / EB ===
+local indicatorFrame = Instance.new("Frame", hud)
+indicatorFrame.Size = UDim2.new(0, 120, 0, 34)
+indicatorFrame.Position = UDim2.new(0.5, -60, 1, -115)  -- чуть выше keybinds
+indicatorFrame.BackgroundColor3 = Color3.fromRGB(8,12,8)
+indicatorFrame.BackgroundTransparency = 0.35
+indicatorFrame.BorderSizePixel = 0
+indicatorFrame.Visible = C.showIndicators
+Instance.new("UICorner", indicatorFrame).CornerRadius = UDim.new(0, 8)
+
+local indStroke = Instance.new("UIStroke", indicatorFrame)
+indStroke.Color = C.colAccent; indStroke.Thickness = 1.5; indStroke.Transparency = 0.4
+
+local indLbl = Instance.new("TextLabel", indicatorFrame)
+indLbl.Size = UDim2.new(1,0,1,0)
+indLbl.BackgroundTransparency = 1
+indLbl.Font = Enum.Font.GothamBlack
+indLbl.Text = "—"
+indLbl.TextColor3 = C.colAccent2
+indLbl.TextSize = 18
+indLbl.TextTransparency = 0.6
+
+-- keybinds
 local keysFrame = Instance.new("Frame", hud)
 keysFrame.Size = UDim2.new(0,380,0,40); keysFrame.Position = UDim2.new(0.5,-190,1,-70)
 keysFrame.BackgroundTransparency = 1
@@ -685,7 +705,7 @@ local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v24  •  smooth bhop"
+subtitle.Text = "v25"
 subtitle.TextColor3 = C.colAccent2
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -928,13 +948,13 @@ tabMisc.MouseButton1Click:Connect(function() selectTab("Settings") end)
 -- Movement
 makeLabel(pageMove, "MASTER")
 makeToggle(pageMove, "Movement enabled", "moveEnabled")
-makeLabel(pageMove, "BHOP (smooth — CS:GO style)")
+makeLabel(pageMove, "BHOP")
 makeSlider(pageMove, "Walk speed", "walkSpeed", 8, 60, "")
 makeSlider(pageMove, "Bhop cooldown", "jumpCd", 0.01, 0.15, "s")
 makeSlider(pageMove, "Perfect bhop bonus", "bhopPerfectBonus", 0, 5, "")
 makeSlider(pageMove, "Bhop max speed", "bhopMaxSpeed", 30, 150, "")
 makeLabel(pageMove, "COUNTER-STRAFE")
-makeToggle(pageMove, "Counter-strafe (fast stop)", "counterStrafeEnabled")
+makeToggle(pageMove, "Counter-strafe", "counterStrafeEnabled")
 makeSlider(pageMove, "Counter power", "counterStrafePower", 0.5, 0.99, "")
 
 -- Air
@@ -942,7 +962,7 @@ makeLabel(pageAir, "AIR STRAFE")
 makeToggle(pageAir, "Autostrafe (Shift)", "autostrafeEnabled")
 makeSlider(pageAir, "Air accel", "autostrafeAccel", 20, 200, "")
 makeSlider(pageAir, "Air max speed", "autostrafeMaxSpeed", 40, 200, "")
-makeLabel(pageAir, "GLIDE")
+makeLabel(pageAir, "GLIDE (PS)")
 makeSlider(pageAir, "Glide control", "glideControl", 2, 25, "")
 makeLabel(pageAir, "DOUBLE JUMP")
 makeToggle(pageAir, "Enable double jump", "doubleJumpEnabled")
@@ -950,11 +970,23 @@ makeSlider(pageAir, "Double jump power", "doubleJumpPower", 10, 80, "")
 
 -- Edge
 makeLabel(pageEdge, "EDGEJUMP")
-makeToggle(pageEdge, "Enable edgejump", "edgeJumpEnabled")
+makeToggle(pageEdge, "Enable edgejump (Ctrl+Space air)", "edgeJumpEnabled")
 makeSlider(pageEdge, "Jump power", "edgeJumpPower", 5, 60, "")
 makeSlider(pageEdge, "Jump limit", "edgeJumpLimit", 1, 5, "")
-makeLabel(pageEdge, "EDGEBUG")
-makeToggle(pageEdge, "Enable edgebug (hold Ctrl falling)", "edgebugEnabled")
+makeLabel(pageEdge, "EDGEBUG (EB) — auto")
+makeToggle(pageEdge, "Enable edgebug (auto on fall)", "edgebugEnabled")
+makeSlider(pageEdge, "Min fall speed", "edgebugMinFallSpeed", 10, 50, "")
+makeLabel(pageEdge, "INFO")
+local ebInfo = Instance.new("TextLabel", pageEdge)
+ebInfo.Size = UDim2.new(1,0,0,60)
+ebInfo.BackgroundTransparency = 1
+ebInfo.Font = Enum.Font.Gotham
+ebInfo.Text = "Falls without damage — auto.\nJust fall off any high place."
+ebInfo.TextColor3 = Color3.fromRGB(100,140,100)
+ebInfo.TextSize = 11
+ebInfo.TextXAlignment = Enum.TextXAlignment.Left
+ebInfo.TextYAlignment = Enum.TextYAlignment.Top
+ebInfo.TextWrapped = true
 makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end)
 
 -- HUD
@@ -964,6 +996,7 @@ makeToggle(pageHUD, "Show speed bar", "showSpeedBar", function(v) speedBarBg.Vis
 makeToggle(pageHUD, "Show FPS + Ping", "showFPS", function(v) infoFrame.Visible = v end)
 makeToggle(pageHUD, "Show keybinds", "showMidKeys", function(v) keysFrame.Visible = v end)
 makeToggle(pageHUD, "Show bhop streak", "showStreak", function(v) streakLbl.Visible = v end)
+makeToggle(pageHUD, "Show PS / EB indicators", "showIndicators", function(v) indicatorFrame.Visible = v end)
 
 -- Keybinds
 makeLabel(pageKeys, "CLICK A BUTTON, THEN PRESS A KEY")
@@ -1013,8 +1046,8 @@ local function makeKeybindRow(parent, label, keyName)
 end
 
 makeKeybindRow(pageKeys, "Bhop", "bhopKey")
-makeKeybindRow(pageKeys, "Glide", "glideKey")
-makeKeybindRow(pageKeys, "Edgejump / Edgebug", "edgeJumpKey")
+makeKeybindRow(pageKeys, "Glide (PS)", "glideKey")
+makeKeybindRow(pageKeys, "Edgejump", "edgeJumpKey")
 makeKeybindRow(pageKeys, "Autostrafe", "autostrafeKey")
 makeKeybindRow(pageKeys, "Menu", "menuKey")
 makeKeybindRow(pageKeys, "Mouse unlock", "mouseKey")
@@ -1203,6 +1236,31 @@ RS.RenderStepped:Connect(function(dt)
         streakLbl.Text = ""
     end
 
+    -- === INDICATORS PS / EB ===
+    if C.showIndicators then
+        local timeNow = tick()
+        local psActive = (timeNow - lastGlideTick) < 0.15  -- glide активен
+        local ebActive = (timeNow - lastEdgebugTick) < 1.0  -- edgebug недавно сработал
+
+        if psActive and ebActive then
+            indLbl.Text = "PS + EB"
+            indLbl.TextColor3 = Color3.fromRGB(255, 200, 80)
+            indStroke.Color = Color3.fromRGB(255, 200, 80)
+        elseif psActive then
+            indLbl.Text = "PS"
+            indLbl.TextColor3 = C.colAccent
+            indStroke.Color = C.colAccent
+        elseif ebActive then
+            indLbl.Text = "EB"
+            indLbl.TextColor3 = Color3.fromRGB(255, 140, 90)
+            indStroke.Color = Color3.fromRGB(255, 140, 90)
+        else
+            indLbl.Text = "—"
+            indLbl.TextColor3 = C.colAccent2
+            indStroke.Color = C.colAccent2
+        end
+    end
+
     setKey(kbSpace, UIS:IsKeyDown(C.bhopKey))
     setKey(kbCtrl,  UIS:IsKeyDown(C.edgeJumpKey))
     setKey(kbShift, UIS:IsKeyDown(C.autostrafeKey))
@@ -1217,4 +1275,4 @@ game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v24 loaded")
+print("[CUCUMBER] v25 loaded")
