@@ -1,7 +1,8 @@
 -- ============================================================
--- CUCUMBER Movement — v27 (TB = head pixel surf)
+-- CUCUMBER Movement — v28 (TB = head pixel surf) + AIM/ESP
 -- RightShift = menu | Z = unlock mouse | End = unload
 -- V = pixel surf (feet) | H (hold) = texture bug (head)
+-- Q (hold) = aim | X = toggle aim
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -9,6 +10,7 @@ local RS      = game:GetService("RunService")
 local UIS     = game:GetService("UserInputService")
 local Tween   = game:GetService("TweenService")
 local Http    = game:GetService("HttpService")
+local VIM     = game:GetService("VirtualInputManager")
 
 if _G.__CUCUMBER_LOADED then
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
@@ -21,9 +23,46 @@ local hrp  = char:WaitForChild("HumanoidRootPart")
 local hum  = char:WaitForChild("Humanoid")
 local head = char:WaitForChild("Head")
 local cam  = workspace.CurrentCamera
+local mouse = plr:GetMouse()
 
-local CONFIG_FILE = "cucumber_v27.json"
+local CONFIG_FILE = "cucumber_v28.json"
 local HAS_FILE_IO = (typeof(writefile) == "function") and (typeof(readfile) == "function")
+
+-- ============================================================
+-- AIM / ESP STATE (declared before C so menu builders can access)
+-- ============================================================
+local Aim = {
+    enabled = false,
+    silent = true,
+    wallCheck = true,
+    fov = 250,
+    smoothness = 0.25,
+    targetPart = "Head",
+    visibleOnly = true,
+    drawFov = true,
+    key = Enum.KeyCode.Q,
+    toggleKey = Enum.KeyCode.X,
+    teamCheck = true,
+    aliveCheck = true,
+    prediction = 0.08,
+    triggerbot = false,
+    triggerFov = 4,
+    autoFire = false,
+}
+
+local Esp = {
+    enabled = true,
+    box = true,
+    name = true,
+    health = true,
+    distance = true,
+    tracer = true,
+    chams = false,
+    maxDistance = 2000,
+    color = Color3.fromRGB(255, 80, 80),
+    boxColor = Color3.fromRGB(255, 80, 80),
+    textSize = 13,
+}
 
 -- ============================================================
 -- CONFIG
@@ -46,7 +85,6 @@ local C = {
     glideKey = Enum.KeyCode.V,
     glideControl = 10,
 
-    -- TEXTURE BUG = head surf
     textureBugEnabled = true,
     textureBugKey = Enum.KeyCode.H,
     textureBugMaxSpeed = 100,
@@ -102,6 +140,16 @@ local function saveConfig()
             local t = typeof(v)
             if t == "number" or t == "boolean" or t == "string" then d[k] = v end
         end
+        d.aim = {}
+        for k, v in pairs(Aim) do
+            local t = typeof(v)
+            if t == "number" or t == "boolean" or t == "string" then d.aim[k] = tostring(v) end
+        end
+        d.esp = {}
+        for k, v in pairs(Esp) do
+            local t = typeof(v)
+            if t == "number" or t == "boolean" or t == "string" then d.esp[k] = tostring(v) end
+        end
         writefile(CONFIG_FILE, Http:JSONEncode(d))
     end))
 end
@@ -112,6 +160,26 @@ local function loadConfig()
         if not isfile(CONFIG_FILE) then return end
         local d = Http:JSONDecode(readfile(CONFIG_FILE))
         for k, v in pairs(d) do if C[k] ~= nil then C[k] = v end end
+        if d.aim then
+            for k, v in pairs(d.aim) do
+                if Aim[k] ~= nil then
+                    local cur = Aim[k]
+                    if type(cur) == "boolean" then Aim[k] = (v == "true")
+                    elseif type(cur) == "number" then Aim[k] = tonumber(v) or cur
+                    else Aim[k] = v end
+                end
+            end
+        end
+        if d.esp then
+            for k, v in pairs(d.esp) do
+                if Esp[k] ~= nil then
+                    local cur = Esp[k]
+                    if type(cur) == "boolean" then Esp[k] = (v == "true")
+                    elseif type(cur) == "number" then Esp[k] = tonumber(v) or cur
+                    else Esp[k] = v end
+                end
+            end
+        end
     end))
 end
 
@@ -143,7 +211,7 @@ sSub.Size = UDim2.new(1,0,0,20)
 sSub.Position = UDim2.new(0,0,0.5,20)
 sSub.BackgroundTransparency = 1
 sSub.Font = Enum.Font.GothamBold
-sSub.Text = "v27"
+sSub.Text = "v28"
 sSub.TextColor3 = Color3.fromRGB(90,180,80)
 sSub.TextSize = 13
 sSub.TextTransparency = 1
@@ -177,7 +245,6 @@ local smoothedSpeed = 0
 local bhopCacheVel = nil
 local bhopChainVel = 0
 
--- TB state
 local tbOn = false
 local tbSpeed = 0
 local tbDir = Vector3.zero
@@ -226,7 +293,6 @@ local function raycastDown(maxDist)
     return workspace:Raycast(hrp.Position, Vector3.new(0, -(maxDist or 20), 0), p)
 end
 
--- ищем поверхность вокруг головы (вперёд, в бок, вниз)
 local function findHeadSurface()
     if not head or not hrp then return nil end
 
@@ -235,14 +301,13 @@ local function findHeadSurface()
     params.FilterDescendantsInstances = {char}
     params.IgnoreWater = true
 
-    -- направление вперёд (куда летим)
     local fwd = tbDir
     if fwd.Magnitude < 0.01 then
         local look = hrp.CFrame.LookVector
         fwd = Vector3.new(look.X, 0, look.Z).Unit
     end
 
-    local right = Vector3.new(-fwd.Z, 0, fwd.X)  -- перпендикуляр
+    local right = Vector3.new(-fwd.Z, 0, fwd.X)
 
     local dirs = {
         fwd,
@@ -315,6 +380,7 @@ local function hookCharacter(c)
     hum = c:WaitForChild("Humanoid")
     head = c:WaitForChild("Head")
     cam = workspace.CurrentCamera
+    mouse = plr:GetMouse()
 
     vel = Vector3.zero
     alive = true
@@ -354,7 +420,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- INPUT
+-- INPUT — jump/double jump
 -- ============================================================
 UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
@@ -435,12 +501,11 @@ RS.Heartbeat:Connect(function(dt)
     end
 
     -----------------------------------------------------------
-    -- TEXTURE BUG (head surf) — H held in air
+    -- TEXTURE BUG (head surf)
     -----------------------------------------------------------
     local wantTB = C.textureBugEnabled and keyDown(C.textureBugKey) and not onG
 
     if wantTB and not tbOn then
-        -- вход в TB
         tbOn = true
         local h = Vector3.new(ev.X, 0, ev.Z)
         tbSpeed = math.max(h.Magnitude, C.walkSpeed)
@@ -452,7 +517,6 @@ RS.Heartbeat:Connect(function(dt)
         end
         tbHitSurface = false
 
-        -- tilt camera forward
         if C.textureBugCamTilt and cam then
             Tween:Create(cam, TweenInfo.new(0.15), {
                 CFrame = cam.CFrame * CFrame.Angles(math.rad(8), 0, 0)
@@ -460,7 +524,6 @@ RS.Heartbeat:Connect(function(dt)
         end
     elseif not wantTB and tbOn then
         tbOn = false
-        -- return camera
         if C.textureBugCamTilt and cam then
             Tween:Create(cam, TweenInfo.new(0.2), {
                 CFrame = cam.CFrame * CFrame.Angles(math.rad(-8), 0, 0)
@@ -471,38 +534,30 @@ RS.Heartbeat:Connect(function(dt)
     if tbOn then
         lastTbTick = tick()
 
-        -- руление
         if m then
             local turn = C.textureBugControl * dt
             local nd = tbDir + m * turn
             if nd.Magnitude > 0.001 then tbDir = nd.Unit end
         end
 
-        -- ищем поверхность вокруг головы
         local normal, hitPos = findHeadSurface()
 
         if normal then
             tbHitSurface = true
-            -- проецируем движение вдоль поверхности
             local along = tbDir - normal * tbDir:Dot(normal)
             if along.Magnitude > 0.01 then
                 tbDir = along.Unit
             end
-            -- прижимаемся к поверхности (не отлипаем)
-            -- сдвигаем hrp чуть к нормали
             hrp.CFrame = hrp.CFrame + normal * C.textureBugStick * dt
         end
 
-        -- ограничение скорости
         if tbSpeed > C.textureBugMaxSpeed then
             tbSpeed = C.textureBugMaxSpeed
         end
 
-        -- применяем velocity (горизонталь, Y = 0 — не падаем)
         local h = tbDir * tbSpeed
         hrp.AssemblyLinearVelocity = Vector3.new(h.X, 0, h.Z)
 
-        -- safety
         local pos = hrp.Position
         if pos.Y < C.fallY or pos.Magnitude > C.resetDist then
             hrp.CFrame = CFrame.new(spawnPos); vel = Vector3.zero
@@ -518,7 +573,7 @@ RS.Heartbeat:Connect(function(dt)
     end
 
     -----------------------------------------------------------
-    -- PIXEL GLIDE (V) — feet surf
+    -- PIXEL GLIDE
     -----------------------------------------------------------
     local wantGlide = keyDown(C.glideKey) and not onG
     if wantGlide ~= glideOn then
@@ -616,6 +671,393 @@ RS.Heartbeat:Connect(function(dt)
     local pos = hrp.Position
     if pos.Y < C.fallY or pos.Magnitude > C.resetDist then
         hrp.CFrame = CFrame.new(spawnPos); vel = Vector3.zero
+    end
+end)
+
+-- ============================================================
+-- DRAWING WRAPPER
+-- ============================================================
+local hasDrawing = (typeof(Drawing) == "table")
+
+local function newDraw(class, props)
+    if not hasDrawing then return nil end
+    local ok, obj = pcall(Drawing.new, class)
+    if not ok then return nil end
+    for k, v in pairs(props or {}) do
+        pcall(function() obj[k] = v end)
+    end
+    return obj
+end
+
+-- ============================================================
+-- ESP CACHE
+-- ============================================================
+local espCache = {}
+local highlightCache = {}
+
+local function cleanupEsp(plr)
+    local cache = espCache[plr]
+    if cache then
+        for _, obj in pairs(cache) do
+            if obj and obj.Remove then pcall(function() obj:Remove() end) end
+        end
+        espCache[plr] = nil
+    end
+    local hl = highlightCache[plr]
+    if hl then pcall(function() hl:Destroy() end); highlightCache[plr] = nil end
+end
+
+local function cleanupAllEsp()
+    for plr in pairs(espCache) do cleanupEsp(plr) end
+    for plr in pairs(highlightCache) do cleanupEsp(plr) end
+end
+
+-- ============================================================
+-- TARGET SELECTION
+-- ============================================================
+local function getChar(p)
+    local c = p.Character
+    if not c then return nil end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if not h then return nil end
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if not r then return nil end
+    return c, h, r
+end
+
+local function isVisible(part)
+    if not part then return false end
+    local cam = workspace.CurrentCamera
+    local origin = cam.CFrame.Position
+    local dir = (part.Position - origin)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {char, part.Parent}
+    params.IgnoreWater = true
+    local result = workspace:Raycast(origin, dir, params)
+    if not result then return true end
+    return result.Instance == part
+end
+
+local function getAimPart(character)
+    if not character then return nil end
+    local part = character:FindFirstChild(Aim.targetPart)
+    if not part then
+        part = character:FindFirstChild("UpperTorso")
+            or character:FindFirstChild("Torso")
+            or character:FindFirstChild("HumanoidRootPart")
+    end
+    return part
+end
+
+local function predictPos(part, hum)
+    if not part then return Vector3.zero end
+    local base = part.Position
+    local root = part.Parent and part.Parent:FindFirstChild("HumanoidRootPart")
+    if not root then return base end
+    local v = root.AssemblyLinearVelocity
+    local ping = 0
+    pcall(function() ping = (plr:GetNetworkPing() or 0) end)
+    local t = (ping * 0.5) + (Aim.prediction or 0)
+    return base + v * t
+end
+
+local function getClosestTarget()
+    local cam = workspace.CurrentCamera
+    local camPos = cam.CFrame.Position
+    local best, bestDist = nil, math.huge
+    local mousePos = UIS:GetMouseLocation()
+
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= plr then
+            local c, h, hrp2 = getChar(other)
+            if c and h and hrp2 then
+                local skip = false
+                if Aim.aliveCheck and h.Health <= 0 then skip = true end
+                if Aim.teamCheck and plr.Team and other.Team and plr.Team == other.Team then skip = true end
+                if not skip then
+                    local part = getAimPart(c)
+                    if part then
+                        local predicted = predictPos(part, h)
+                        local screenPos, onScreen = cam:WorldToViewportPoint(predicted)
+                        if onScreen and screenPos.Z > 0 then
+                            local dx = screenPos.X - mousePos.X
+                            local dy = screenPos.Y - mousePos.Y
+                            local dist2d = math.sqrt(dx*dx + dy*dy)
+                            if dist2d <= Aim.fov then
+                                local worldDist = (predicted - camPos).Magnitude
+                                if worldDist < bestDist then
+                                    if Aim.visibleOnly and Aim.wallCheck and not isVisible(part) then
+                                        -- skip invisible
+                                    else
+                                        best = {player = other, part = part, pos = predicted}
+                                        bestDist = worldDist
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- ============================================================
+-- SILENT AIM — visual camera untouched, direction override
+-- ============================================================
+local aimTarget = nil
+local holdingAim = false
+local silentLookTarget = nil
+
+local fovCircle = newDraw("Circle", {
+    Color = Color3.fromRGB(255, 80, 80),
+    Thickness = 1.5,
+    Transparency = 0.4,
+    Filled = false,
+})
+
+-- override mouse.Hit target — works when script reads mouse.Hit
+-- (some Roblox shooters use Camera:ScreenPointToRay instead; see visual aim below)
+local function fireAtTarget()
+    if not aimTarget then return end
+    local cam = workspace.CurrentCamera
+    local origin = cam.CFrame.Position
+    local dir = (aimTarget.pos - origin)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {char}
+    params.IgnoreWater = true
+    local hit = workspace:Raycast(origin, dir, params)
+    if hit and hit.Instance:IsDescendantOf(aimTarget.player.Character) then
+        -- target is in line — fire
+        if Aim.autoFire then
+            pcall(function()
+                VIM:SendMouseButtonEvent(mouse.X, mouse.Y, 0, true, game, 0)
+                VIM:SendMouseButtonEvent(mouse.X, mouse.Y, 0, false, game, 0)
+            end)
+        end
+    end
+end
+
+-- ============================================================
+-- ESP UPDATE
+-- ============================================================
+local function updateEsp()
+    if not Esp.enabled or not hasDrawing then
+        cleanupAllEsp()
+        return
+    end
+    local cam = workspace.CurrentCamera
+    local camPos = cam.CFrame.Position
+    local viewport = cam.ViewportSize
+    local seen = {}
+
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= plr then
+            local c, h, hrp2 = getChar(other)
+            if c and h and hrp2 and h.Health > 0 then
+                local dist = (hrp2.Position - camPos).Magnitude
+                if dist <= Esp.maxDistance then
+                    local headPos, onScreen = cam:WorldToViewportPoint(hrp2.Position + Vector3.new(0, 1.5, 0))
+                    local footPos = cam:WorldToViewportPoint(hrp2.Position - Vector3.new(0, 2.5, 0))
+                    if onScreen and headPos.Z > 0 and footPos.Z > 0 then
+                        seen[other] = true
+                        local cache = espCache[other]
+                        if not cache then
+                            cache = {
+                                box = newDraw("Square", {}),
+                                name = newDraw("Text", {Size = Esp.textSize, Center = false, Outline = true}),
+                                health = newDraw("Square", {}),
+                                healthBg = newDraw("Square", {Color = Color3.fromRGB(0,0,0), Filled = true, Transparency = 0.4}),
+                                tracer = newDraw("Line", {Thickness = 1, Transparency = 0.4}),
+                            }
+                            espCache[other] = cache
+                        end
+                        local box = cache.box
+                        local name = cache.name
+                        local hpBar = cache.health
+                        local hpBg = cache.healthBg
+                        local tracer = cache.tracer
+
+                        if box then
+                            local x = math.min(headPos.X, footPos.X)
+                            local y = math.min(headPos.Y, footPos.Y)
+                            local w = math.abs(headPos.X - footPos.X)
+                            local hgt = math.abs(headPos.Y - footPos.Y)
+                            if w < 4 then w = 4 end
+                            if hgt < 6 then hgt = 6 end
+                            box.Visible = Esp.box
+                            box.Color = Esp.boxColor
+                            box.Thickness = 1
+                            box.Position = Vector2.new(x, y)
+                            box.Size = Vector2.new(w, hgt)
+                        end
+
+                        if name then
+                            name.Visible = Esp.name
+                            name.Color = Esp.color
+                            name.Position = Vector2.new(headPos.X - 40, headPos.Y - 18)
+                            local label = other.Name
+                            if Esp.distance then
+                                label = label .. " [" .. math.floor(dist) .. "]"
+                            end
+                            name.Text = label
+                        end
+
+                        if hpBar and hpBg then
+                            local bh = math.abs(headPos.Y - footPos.Y)
+                            if bh < 6 then bh = 6 end
+                            hpBg.Visible = Esp.health
+                            hpBg.Position = Vector2.new(headPos.X - 60, math.min(headPos.Y, footPos.Y))
+                            hpBg.Size = Vector2.new(3, bh)
+                            hpBar.Visible = Esp.health
+                            hpBar.Color = Color3.fromRGB(80, 220, 80)
+                            hpBar.Position = Vector2.new(headPos.X - 60, math.min(headPos.Y, footPos.Y) + bh * (1 - h.Health / h.MaxHealth))
+                            hpBar.Size = Vector2.new(3, bh * (h.Health / h.MaxHealth))
+                            hpBar.Filled = true
+                        end
+
+                        if tracer then
+                            tracer.Visible = Esp.tracer
+                            tracer.Color = Esp.boxColor
+                            tracer.From = Vector2.new(viewport.X / 2, viewport.Y)
+                            tracer.To = Vector2.new(headPos.X, math.min(headPos.Y, footPos.Y) + 20)
+                        end
+
+                        if Esp.chams then
+                            if not highlightCache[other] then
+                                local hl = Instance.new("Highlight")
+                                hl.Parent = c
+                                hl.FillColor = Esp.color
+                                hl.OutlineColor = Esp.color
+                                hl.FillTransparency = 0.6
+                                hl.OutlineTransparency = 0.2
+                                highlightCache[other] = hl
+                            else
+                                local hl = highlightCache[other]
+                                hl.FillColor = Esp.color
+                                hl.OutlineColor = Esp.color
+                            end
+                        else
+                            if highlightCache[other] then
+                                highlightCache[other]:Destroy()
+                                highlightCache[other] = nil
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for other in pairs(espCache) do
+        if not seen[other] then cleanupEsp(other) end
+    end
+    for other in pairs(highlightCache) do
+        if not seen[other] then
+            if highlightCache[other] then highlightCache[other]:Destroy() end
+            highlightCache[other] = nil
+        end
+    end
+end
+
+-- ============================================================
+-- AIM KEY
+-- ============================================================
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Aim.key and Aim.enabled then
+        holdingAim = true
+    end
+    if input.KeyCode == Aim.toggleKey then
+        Aim.enabled = not Aim.enabled
+        if not Aim.enabled then holdingAim = false end
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Aim.key then holdingAim = false end
+end)
+
+-- ============================================================
+-- RENDER STEP — aim + esp + triggerbot
+-- ============================================================
+RS:BindToRenderStep("CucumberAim", Enum.RenderPriority.Camera.Value + 2, function(dt)
+    if not _G.__CUCUMBER_LOADED then return end
+    if not hrp or not hrp.Parent then return end
+
+    updateEsp()
+
+    if Aim.enabled and holdingAim then
+        aimTarget = getClosestTarget()
+    else
+        aimTarget = nil
+    end
+
+    -- silent aim: move camera for one frame, game reads direction
+    if aimTarget and Aim.silent then
+        local camObj = workspace.CurrentCamera
+        local origin = camObj.CFrame.Position
+        local direction = (aimTarget.pos - origin).Unit
+        local currentLook = camObj.CFrame.LookVector
+        -- only nudge if not already pointing
+        if currentLook:Dot(direction) < 0.999 then
+            silentLookTarget = CFrame.lookAt(origin, origin + direction)
+            camObj.CFrame = camObj.CFrame:Lerp(silentLookTarget, math.clamp(1 - Aim.smoothness * 0.5, 0.4, 1))
+        end
+    elseif aimTarget and not Aim.silent then
+        local camObj = workspace.CurrentCamera
+        local origin = camObj.CFrame.Position
+        local direction = (aimTarget.pos - origin).Unit
+        local lookCFrame = CFrame.lookAt(origin, origin + direction)
+        camObj.CFrame = camObj.CFrame:Lerp(lookCFrame, math.clamp(Aim.smoothness, 0.01, 1))
+    end
+
+    -- auto-fire
+    if aimTarget and Aim.autoFire then
+        fireAtTarget()
+    end
+
+    -- triggerbot
+    if Aim.triggerbot and not aimTarget then
+        local camObj = workspace.CurrentCamera
+        local mousePos = UIS:GetMouseLocation()
+        for _, other in ipairs(Players:GetPlayers()) do
+            if other ~= plr then
+                local c2, h2, hrp3 = getChar(other)
+                if c2 and h2 and hrp3 and h2.Health > 0 then
+                    local part = getAimPart(c2)
+                    if part then
+                        local sp, on = camObj:WorldToViewportPoint(part.Position)
+                        if on and sp.Z > 0 then
+                            local d = math.sqrt((sp.X-mousePos.X)^2 + (sp.Y-mousePos.Y)^2)
+                            if d <= Aim.triggerFov then
+                                if isVisible(part) then
+                                    pcall(function()
+                                        VIM:SendMouseButtonEvent(mouse.X, mouse.Y, 0, true, game, 0)
+                                        VIM:SendMouseButtonEvent(mouse.X, mouse.Y, 0, false, game, 0)
+                                    end)
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- FOV circle
+    if fovCircle then
+        if Aim.drawFov and Aim.enabled then
+            fovCircle.Visible = true
+            local camObj = workspace.CurrentCamera
+            fovCircle.Position = Vector2.new(camObj.ViewportSize.X / 2, camObj.ViewportSize.Y / 2)
+            fovCircle.Radius = Aim.fov
+        else
+            fovCircle.Visible = false
+        end
     end
 end)
 
@@ -745,6 +1187,8 @@ local kbS     = makeKeyBadge("S", 6)
 local kbD     = makeKeyBadge("D", 7)
 local kbV     = makeKeyBadge("V", 8)
 local kbH     = makeKeyBadge("H", 9)
+local kbQ     = makeKeyBadge("Q", 10)
+local kbX     = makeKeyBadge("X", 11)
 
 local function setKey(b, on)
     if not b then return end
@@ -822,7 +1266,7 @@ local subtitle = Instance.new("TextLabel", headerBg)
 subtitle.Size = UDim2.new(1,-60,0,14); subtitle.Position = UDim2.new(0,16,0,34)
 subtitle.BackgroundTransparency = 1
 subtitle.Font = Enum.Font.Gotham
-subtitle.Text = "v27"
+subtitle.Text = "v28 + aim + esp"
 subtitle.TextColor3 = C.colAccent2
 subtitle.TextSize = 10
 subtitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -943,6 +1387,38 @@ local function makeToggle(parent, label, key, onChange)
     return row
 end
 
+-- custom sub-toggle: writes to arbitrary table, not C
+local function makeSubToggle(parent, label, tbl, key, onChange)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1,0,0,30); row.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1,-60,1,0); lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham; lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(230,240,230); lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    local track = Instance.new("Frame", row)
+    track.Size = UDim2.new(0,40,0,20); track.Position = UDim2.new(1,-40,0.5,-10)
+    track.BackgroundColor3 = tbl[key] and C.colAccent or Color3.fromRGB(40,60,40)
+    track.BorderSizePixel = 0
+    corner(track, 10)
+    local knob = Instance.new("Frame", track)
+    knob.Size = UDim2.new(0,16,0,16)
+    knob.Position = tbl[key] and UDim2.new(1,-18,0.5,-8) or UDim2.new(0,2,0.5,-8)
+    knob.BackgroundColor3 = Color3.fromRGB(240,255,240)
+    knob.BorderSizePixel = 0
+    corner(knob, 8)
+    local btn = Instance.new("TextButton", row)
+    btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1; btn.Text = ""
+    btn.MouseButton1Click:Connect(function()
+        tbl[key] = not tbl[key]
+        local on = tbl[key]
+        Tween:Create(track, TweenInfo.new(0.18), {BackgroundColor3 = on and C.colAccent or Color3.fromRGB(40,60,40)}):Play()
+        Tween:Create(knob, TweenInfo.new(0.18), {Position = on and UDim2.new(1,-18,0.5,-8) or UDim2.new(0,2,0.5,-8)}):Play()
+        if onChange then pcall(onChange, on) end
+    end)
+    return row
+end
+
 local function makeSlider(parent, label, key, min, max, suffix)
     local row = Instance.new("Frame", parent)
     row.Size = UDim2.new(1,0,0,44); row.BackgroundTransparency = 1
@@ -1001,6 +1477,63 @@ local function makeSlider(parent, label, key, min, max, suffix)
     return row
 end
 
+local function makeSubSlider(parent, label, tbl, key, min, max, suffix)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1,0,0,44); row.BackgroundTransparency = 1
+    local top = Instance.new("Frame", row)
+    top.Size = UDim2.new(1,0,0,20); top.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", top)
+    lbl.Size = UDim2.new(0.7,0,1,0); lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(230,240,230)
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    local val = Instance.new("TextLabel", top)
+    val.Size = UDim2.new(0.3,0,1,0); val.Position = UDim2.new(0.7,0,0,0)
+    val.BackgroundTransparency = 1
+    val.Font = Enum.Font.GothamBold
+    val.Text = tostring(tbl[key]) .. (suffix or "")
+    val.TextColor3 = C.colAccent
+    val.TextSize = 13
+    val.TextXAlignment = Enum.TextXAlignment.Right
+    local bar = Instance.new("Frame", row)
+    bar.Size = UDim2.new(1,0,0,6); bar.Position = UDim2.new(0,0,0,28)
+    bar.BackgroundColor3 = Color3.fromRGB(40,60,40)
+    bar.BorderSizePixel = 0
+    corner(bar, 3)
+    local fill = Instance.new("Frame", bar)
+    fill.Size = UDim2.new((tbl[key]-min)/(max-min),0,1,0)
+    fill.BackgroundColor3 = C.colAccent
+    fill.BorderSizePixel = 0
+    corner(fill, 3)
+    local btn = Instance.new("TextButton", row)
+    btn.Size = UDim2.new(1,0,0,20); btn.Position = UDim2.new(0,0,0,20)
+    btn.BackgroundTransparency = 1; btn.Text = ""
+    local dragging = false
+    local function setFromX(x)
+        local rel = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local v = min + (max-min) * rel
+        v = math.floor(v*100 + 0.5) / 100
+        tbl[key] = v
+        val.Text = tostring(v) .. (suffix or "")
+        Tween:Create(fill, TweenInfo.new(0.08), {Size = UDim2.new(rel,0,1,0)}):Play()
+    end
+    btn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; setFromX(i.Position.X)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            setFromX(i.Position.X)
+        end    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    return row
+end
+
 local function makeButton(parent, label, callback, color)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1,0,0,32)
@@ -1044,6 +1577,8 @@ end
 local pageMove = createPage("Movement")
 local pageAir  = createPage("Air")
 local pageEdge = createPage("Edge")
+local pageAim  = createPage("Aimbot")
+local pageEsp  = createPage("Visuals")
 local pageHUD  = createPage("HUD")
 local pageKeys = createPage("Keybinds")
 local pageMisc = createPage("Settings")
@@ -1051,18 +1586,22 @@ local pageMisc = createPage("Settings")
 local tabMove  = createTabButton("Movement", 1)
 local tabAir   = createTabButton("Air", 2)
 local tabEdge  = createTabButton("Edge", 3)
-local tabHUD   = createTabButton("HUD", 4)
-local tabKeys  = createTabButton("Keybinds", 5)
-local tabMisc  = createTabButton("Settings", 6)
+local tabAim   = createTabButton("Aimbot", 4)
+local tabEsp   = createTabButton("Visuals", 5)
+local tabHUD   = createTabButton("HUD", 6)
+local tabKeys  = createTabButton("Keybinds", 7)
+local tabMisc  = createTabButton("Settings", 8)
 
 tabMove.MouseButton1Click:Connect(function() selectTab("Movement") end)
 tabAir.MouseButton1Click:Connect(function() selectTab("Air") end)
 tabEdge.MouseButton1Click:Connect(function() selectTab("Edge") end)
+tabAim.MouseButton1Click:Connect(function() selectTab("Aimbot") end)
+tabEsp.MouseButton1Click:Connect(function() selectTab("Visuals") end)
 tabHUD.MouseButton1Click:Connect(function() selectTab("HUD") end)
 tabKeys.MouseButton1Click:Connect(function() selectTab("Keybinds") end)
 tabMisc.MouseButton1Click:Connect(function() selectTab("Settings") end)
 
--- Movement
+-- Movement page
 makeLabel(pageMove, "MASTER")
 makeToggle(pageMove, "Movement enabled", "moveEnabled")
 makeLabel(pageMove, "BHOP")
@@ -1115,6 +1654,38 @@ tbInfo.TextWrapped = true
 
 makeButton(pageEdge, "Reset edgejump counter", function() C.edgeJumpUsed = 0 end)
 
+-- Aimbot page
+makeLabel(pageAim, "AIMBOT")
+makeSubToggle(pageAim, "Enable aimbot", Aim, "enabled")
+makeSubToggle(pageAim, "Silent aim", Aim, "silent")
+makeSubToggle(pageAim, "Visible only (wall check)", Aim, "visibleOnly")
+makeSubToggle(pageAim, "Team check", Aim, "teamCheck")
+makeSubToggle(pageAim, "Draw FOV circle", Aim, "drawFov")
+makeSubSlider(pageAim, "FOV radius", Aim, "fov", 20, 800, "")
+makeSubSlider(pageAim, "Smoothness", Aim, "smoothness", 0.01, 1, "")
+makeSubSlider(pageAim, "Prediction", Aim, "prediction", 0, 0.3, "s")
+
+makeLabel(pageAim, "AIM PART")
+makeButton(pageAim, "Head", function() Aim.targetPart = "Head" end)
+makeButton(pageAim, "Torso", function() Aim.targetPart = "Torso" end)
+makeButton(pageAim, "HumanoidRootPart", function() Aim.targetPart = "HumanoidRootPart" end)
+
+makeLabel(pageAim, "EXTRA")
+makeSubToggle(pageAim, "Auto-fire (rage)", Aim, "autoFire")
+makeSubToggle(pageAim, "Triggerbot", Aim, "triggerbot")
+makeSubSlider(pageAim, "Triggerbot FOV", Aim, "triggerFov", 1, 20, "px")
+
+-- Visuals page
+makeLabel(pageEsp, "ESP")
+makeSubToggle(pageEsp, "Enable ESP", Esp, "enabled")
+makeSubToggle(pageEsp, "Box", Esp, "box")
+makeSubToggle(pageEsp, "Name", Esp, "name")
+makeSubToggle(pageEsp, "Health bar", Esp, "health")
+makeSubToggle(pageEsp, "Distance", Esp, "distance")
+makeSubToggle(pageEsp, "Tracer", Esp, "tracer")
+makeSubToggle(pageEsp, "Chams (Highlight)", Esp, "chams")
+makeSubSlider(pageEsp, "Max distance", Esp, "maxDistance", 100, 5000, "")
+
 -- HUD
 makeLabel(pageHUD, "MID SCREEN")
 makeToggle(pageHUD, "Show speed", "showSpeed", function(v) speedFrame.Visible = v end)
@@ -1122,12 +1693,13 @@ makeToggle(pageHUD, "Show speed bar", "showSpeedBar", function(v) speedBarBg.Vis
 makeToggle(pageHUD, "Show FPS + Ping", "showFPS", function(v) infoFrame.Visible = v end)
 makeToggle(pageHUD, "Show keybinds", "showMidKeys", function(v) keysFrame.Visible = v end)
 makeToggle(pageHUD, "Show bhop streak", "showStreak", function(v) streakLbl.Visible = v end)
-makeToggle(pageHUD, "Show PS / EB / TB indicators", "showIndicators", function(v) indicatorFrame.Visible = v end)
+makeToggle(pageHUD, "Show indicators", "showIndicators", function(v) indicatorFrame.Visible = v end)
 
 -- Keybinds
 makeLabel(pageKeys, "CLICK A BUTTON, THEN PRESS A KEY")
 
-local function makeKeybindRow(parent, label, keyName)
+local function makeKeybindRow(parent, label, keyName, tbl)
+    tbl = tbl or C
     local row = Instance.new("Frame", parent)
     row.Size = UDim2.new(1,0,0,32)
     row.BackgroundTransparency = 1
@@ -1144,7 +1716,7 @@ local function makeKeybindRow(parent, label, keyName)
     btn.BackgroundColor3 = Color3.fromRGB(20,28,20)
     btn.BorderSizePixel = 0
     btn.Font = Enum.Font.GothamBold
-    btn.Text = C[keyName] and C[keyName].Name or "?"
+    btn.Text = tbl[keyName] and tbl[keyName].Name or "?"
     btn.TextColor3 = C.colAccent
     btn.TextSize = 12
     btn.AutoButtonColor = false
@@ -1157,12 +1729,12 @@ local function makeKeybindRow(parent, label, keyName)
         conn = UIS.InputBegan:Connect(function(input, gp)
             if gp then return end
             if input.UserInputType == Enum.UserInputType.Keyboard then
-                C[keyName] = input.KeyCode
+                tbl[keyName] = input.KeyCode
                 btn.Text = input.KeyCode.Name
                 btn.TextColor3 = C.colAccent
                 conn:Disconnect()
             elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
-                btn.Text = C[keyName].Name
+                btn.Text = tbl[keyName].Name
                 btn.TextColor3 = C.colAccent
                 conn:Disconnect()
             end
@@ -1176,6 +1748,8 @@ makeKeybindRow(pageKeys, "Pixel surf (V)", "glideKey")
 makeKeybindRow(pageKeys, "Edgejump", "edgeJumpKey")
 makeKeybindRow(pageKeys, "Autostrafe", "autostrafeKey")
 makeKeybindRow(pageKeys, "Texture bug (H)", "textureBugKey")
+makeKeybindRow(pageKeys, "Aim (hold)", "key", Aim)
+makeKeybindRow(pageKeys, "Aim toggle", "toggleKey", Aim)
 makeKeybindRow(pageKeys, "Menu", "menuKey")
 makeKeybindRow(pageKeys, "Mouse unlock", "mouseKey")
 
@@ -1297,6 +1871,10 @@ end)
 _G.__CUCUMBER_UNLOAD = function()
     _G.__CUCUMBER_LOADED = false
     pcall(function() saveConfig() end)
+    pcall(function() cleanupAllEsp() end)
+    pcall(function() if fovCircle then fovCircle:Remove() end end)
+    pcall(function() RS:UnbindFromRenderStep("CucumberAim") end)
+    pcall(function() RS:UnbindFromRenderStep("CucumberMouseUnlock") end)
     pcall(function() if footSparks then footSparks:Destroy() end end)
     pcall(function() if hud then hud:Destroy() end end)
     pcall(function() if gui then gui:Destroy() end end)
@@ -1363,7 +1941,6 @@ RS.RenderStepped:Connect(function(dt)
         streakLbl.Text = ""
     end
 
-    -- INDICATORS
     if C.showIndicators then
         local tn = tick()
         local psActive = (tn - lastGlideTick) < 0.15
@@ -1380,6 +1957,8 @@ RS.RenderStepped:Connect(function(dt)
                 table.insert(parts, "TB")
             end
         end
+        if Aim.enabled and holdingAim then table.insert(parts, "AIM") end
+        if Aim.triggerbot then table.insert(parts, "TBOT") end
 
         if #parts == 0 then
             indLbl.Text = "—"
@@ -1390,6 +1969,7 @@ RS.RenderStepped:Connect(function(dt)
             local c = C.colAccent
             if parts[1]:sub(1,2) == "EB" then c = Color3.fromRGB(255, 140, 90) end
             if parts[1]:sub(1,2) == "TB" then c = Color3.fromRGB(180, 140, 255) end
+            if parts[1]:sub(1,3) == "AIM" then c = Color3.fromRGB(255, 80, 80) end
             indLbl.TextColor3 = c
             indStroke.Color = c
         else
@@ -1408,10 +1988,12 @@ RS.RenderStepped:Connect(function(dt)
     setKey(kbD,     UIS:IsKeyDown(Enum.KeyCode.D))
     setKey(kbV,     UIS:IsKeyDown(C.glideKey))
     setKey(kbH,     UIS:IsKeyDown(C.textureBugKey))
+    setKey(kbQ,     UIS:IsKeyDown(Aim.key))
+    setKey(kbX,     Aim.enabled)
 end)
 
 game:BindToClose(function()
     if _G.__CUCUMBER_UNLOAD then _G.__CUCUMBER_UNLOAD() end
 end)
 
-print("[CUCUMBER] v27 loaded")
+print("[CUCUMBER] v28 + aim + esp loaded")
